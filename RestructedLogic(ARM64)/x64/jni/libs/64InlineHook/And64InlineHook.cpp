@@ -27,12 +27,6 @@
  SOFTWARE.
  */
 #define  __STDC_FORMAT_MACROS
-#include <inttypes.h>
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
-#include <sys/mman.h>
-#include <android/log.h>
 
 #if defined(__aarch64__)
 

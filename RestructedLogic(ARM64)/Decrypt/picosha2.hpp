@@ -29,12 +29,6 @@ THE SOFTWARE.
 #define PICOSHA2_BUFFER_SIZE_FOR_INPUT_ITERATOR 1048576  //=1024*1024: default is 1MB memory
 #endif
 
-#include <algorithm>
-#include <cassert>
-#include <iterator>
-#include <sstream>
-#include <vector>
-#include <fstream>
 namespace picosha2 {
 typedef unsigned long word_t;
 typedef unsigned char byte_t;

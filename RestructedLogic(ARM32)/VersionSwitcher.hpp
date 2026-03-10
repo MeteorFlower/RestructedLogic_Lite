@@ -1,7 +1,4 @@
-﻿#include <map>
-#include <string>
-
-#ifndef __arm__
+﻿#ifndef __arm__
 
 #error "This sub-project is only for ARM architecture."
 

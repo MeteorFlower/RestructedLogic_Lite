@@ -1,7 +1,7 @@
-#include "memUtils.h"
-#include "Logging.h"
+#include "memUtils.hpp"
+#include "Logging.hpp"
 
-#include "x64/jni/include/Utils.h"
+#include "x64/jni/include/Utils.hpp"
 #include "x64/jni/libs/64InlineHook/And64InlineHook.hpp"
 
 size_t g_libAddress = NULL;

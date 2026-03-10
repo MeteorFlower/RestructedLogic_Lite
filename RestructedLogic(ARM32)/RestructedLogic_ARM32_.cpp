@@ -415,10 +415,10 @@ std::mutex g_logMutex_v2;
 int hkLogOutputFunc_v2(int a1, ...) {
   va_list va;
   va_start(va, a1);
-  const char *format = (const char *)a1;
 
 #ifdef _DEBUG
 
+  const char *format = (const char *)a1;
   std::lock_guard<std::mutex> lock(g_logMutex);
   LOGI("LogOutputFunc_v2: ");
   LOGI(format, va);
@@ -1177,7 +1177,8 @@ inline void process() {
 __attribute__((constructor)) void libRestructedLogic_ARM32__main() {
   LOGI("Initializing %s", LIB_TAG);
 
-  // DirectInstallOBB::process();
+  DirectInstallOBB::process();  // 直装包
+
 #if GAME_VERSION < 1031
   AliasToID::process();  // 添加植物 ID
 #endif
@@ -1189,6 +1190,7 @@ __attribute__((constructor)) void libRestructedLogic_ARM32__main() {
   if (DirectInstallOBB::available)
     LogOutput::process();  // 用于卡死主进程供 obb 复制
 #endif
+
   RSBPathChangeAndDecryptRSB::process();  // RSB 加密
   PrimeGlyphCacheLimitation::process();   // 修改字符缓冲区大小
   MaxZoom::process();                     // 高视角

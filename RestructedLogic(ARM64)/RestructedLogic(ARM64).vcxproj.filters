@@ -9,25 +9,49 @@
     <ClCompile Include="Decrypt\aes.cpp">
       <Filter>Decrypt</Filter>
     </ClCompile>
+    <ClCompile Include="AXML\axml_parser.cpp">
+      <Filter>AXML</Filter>
+    </ClCompile>
+    <ClCompile Include="XXHash\xxhash.cpp">
+      <Filter>XXHash</Filter>
+    </ClCompile>
+    <ClCompile Include="Unzip\miniz.cpp">
+      <Filter>Unzip</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="pch.h" />
-    <ClInclude Include="x64\jni\include\Utils.h">
+    <ClInclude Include="pch.hpp" />
+    <ClInclude Include="x64\jni\include\Utils.hpp">
       <Filter>x64\jni\include</Filter>
     </ClInclude>
     <ClInclude Include="x64\jni\libs\64InlineHook\And64InlineHook.hpp">
       <Filter>x64\jni\libs\64InlineHook</Filter>
     </ClInclude>
-    <ClInclude Include="RestructedLogic_ARM64_.h" />
-    <ClInclude Include="SexyTypes.h" />
-    <ClInclude Include="Logging.h" />
-    <ClInclude Include="memUtils.h" />
-    <ClInclude Include="VersionSwitcher.h" />
-    <ClInclude Include="Decrypt\aes.h">
+    <ClInclude Include="RestructedLogic_ARM64_.hpp" />
+    <ClInclude Include="SexyTypes.hpp" />
+    <ClInclude Include="Logging.hpp" />
+    <ClInclude Include="memUtils.hpp" />
+    <ClInclude Include="VersionSwitcher.hpp" />
+    <ClInclude Include="Decrypt\aes.hpp">
       <Filter>Decrypt</Filter>
     </ClInclude>
-    <ClInclude Include="Decrypt\picosha2.h">
+    <ClInclude Include="Decrypt\picosha2.hpp">
       <Filter>Decrypt</Filter>
+    </ClInclude>
+    <ClInclude Include="AXML\axml_parser.hpp">
+      <Filter>AXML</Filter>
+    </ClInclude>
+    <ClInclude Include="XXHash\xxhash.hpp">
+      <Filter>XXHash</Filter>
+    </ClInclude>
+    <ClInclude Include="Unzip\HashComparer.hpp">
+      <Filter>Unzip</Filter>
+    </ClInclude>
+    <ClInclude Include="Unzip\miniz.hpp">
+      <Filter>Unzip</Filter>
+    </ClInclude>
+    <ClInclude Include="Unzip\ApkUnzipper.hpp">
+      <Filter>Unzip</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -48,6 +72,15 @@
     </Filter>
     <Filter Include="Decrypt">
       <UniqueIdentifier>{da75c95d-4d88-4a9e-9066-82bcfec5d38c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="AXML">
+      <UniqueIdentifier>{d5e8be5d-1718-464e-bedf-9c3421e6a28d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="XXHash">
+      <UniqueIdentifier>{08ca318c-a9fb-43b0-b415-e937b2744eeb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Unzip">
+      <UniqueIdentifier>{9f81d8da-984b-4979-b7c0-a0440d74c6ae}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

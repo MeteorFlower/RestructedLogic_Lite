@@ -1,7 +1,4 @@
-﻿#include <map>
-#include <string>
-
-#ifndef __aarch64__
+﻿#ifndef __aarch64__
 
 #error "This sub-project is only for ARM64 architecture."
 
@@ -26,6 +23,10 @@ constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
 constexpr size_t LawnAppScreenWidthHeightAddr = 0x8DDA28;
 constexpr size_t BoardZoomAddr = 0xA331D4;
 constexpr size_t BoardZoom2Addr = 0xA33434;
+constexpr size_t WorldMapDoMovementAddr = UNKNOWN;
+constexpr size_t WorldMapScrollAddr = UNKNOWN;
+constexpr size_t KeepCenterAddr = UNKNOWN;
+constexpr size_t ScrollInertanceAddr = UNKNOWN;
 constexpr int firstFreePlantID = UNKNOWN;
 
 #endif
@@ -44,6 +45,10 @@ constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
 constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
 constexpr size_t BoardZoomAddr = UNKNOWN;
 constexpr size_t BoardZoom2Addr = UNKNOWN;
+constexpr size_t WorldMapDoMovementAddr = UNKNOWN;
+constexpr size_t WorldMapScrollAddr = UNKNOWN;
+constexpr size_t KeepCenterAddr = UNKNOWN;
+constexpr size_t ScrollInertanceAddr = UNKNOWN;
 constexpr int firstFreePlantID = 185;
 
 #endif
@@ -62,6 +67,10 @@ constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
 constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
 constexpr size_t BoardZoomAddr = UNKNOWN;
 constexpr size_t BoardZoom2Addr = UNKNOWN;
+constexpr size_t WorldMapDoMovementAddr = UNKNOWN;
+constexpr size_t WorldMapScrollAddr = UNKNOWN;
+constexpr size_t KeepCenterAddr = UNKNOWN;
+constexpr size_t ScrollInertanceAddr = UNKNOWN;
 constexpr int firstFreePlantID = 188;
 
 #endif
@@ -80,6 +89,10 @@ constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
 constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
 constexpr size_t BoardZoomAddr = UNKNOWN;
 constexpr size_t BoardZoom2Addr = UNKNOWN;
+constexpr size_t WorldMapDoMovementAddr = UNKNOWN;
+constexpr size_t WorldMapScrollAddr = UNKNOWN;
+constexpr size_t KeepCenterAddr = UNKNOWN;
+constexpr size_t ScrollInertanceAddr = UNKNOWN;
 constexpr int firstFreePlantID = 191;
 
 #endif
@@ -98,6 +111,10 @@ constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
 constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
 constexpr size_t BoardZoomAddr = UNKNOWN;
 constexpr size_t BoardZoom2Addr = UNKNOWN;
+constexpr size_t WorldMapDoMovementAddr = UNKNOWN;
+constexpr size_t WorldMapScrollAddr = UNKNOWN;
+constexpr size_t KeepCenterAddr = UNKNOWN;
+constexpr size_t ScrollInertanceAddr = UNKNOWN;
 constexpr int firstFreePlantID = UNKNOWN;  // 10.3 不需要
 
 #endif

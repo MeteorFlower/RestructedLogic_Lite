@@ -1,6 +1,4 @@
 #pragma once
-#include <cstdint>
-#include <string>
 
 namespace Sexy {
 typedef std::string SexyString;
