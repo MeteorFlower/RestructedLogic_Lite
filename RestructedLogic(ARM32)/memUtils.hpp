@@ -1,8 +1,5 @@
 #pragma once
-#include <unistd.h>
-#include <cstdlib>
-#include <stdio.h>
-#include "Logging.h"
+#include "Logging.hpp"
 
 #define LOG_RETURN_ADDRESS(level) \
   LOGI("%p", (size_tPTR)__builtin_return_address(level) - g_libAddress);

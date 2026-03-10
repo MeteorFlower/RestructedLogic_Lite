@@ -1,20 +1,307 @@
-﻿#include "RestructedLogic_ARM32_.h"
-#include <string>
-#include <vector>
-#include <algorithm>
-#include <map>
-#include <unistd.h>
-#include "memUtils.h"
-#include <mutex>
-#include <fstream>
-#include <sys/stat.h>
-#include "Decrypt/picosha2.h"
-#include "Decrypt/aes.h"
-#include <thread>
-#include <sys/mman.h>
-#include <sys/sendfile.h>
-#include <fcntl.h>
-#include "VersionSwitcher.h"
+﻿#include "memUtils.hpp"
+#include "Unzip/ApkUnzipper.hpp"
+#include "Unzip/HashComparer.hpp"
+#include "AXML/axml_parser.hpp"
+#include "Decrypt/picosha2.hpp"
+#include "Decrypt/aes.hpp"
+#include "SexyTypes.hpp"
+#include "RestructedLogic_ARM32_.hpp"
+#include "VersionSwitcher.hpp"
+
+using _DWORD = uint32_t;
+using __int64 = int64_t;
+using _BYTE = uint8_t;
+
+namespace DirectInstallOBB {
+// 防止重复读取应用信息
+std::atomic<bool> apkinforeaded(false);
+// RSB迁移是否开始判定
+std::atomic<bool> thread_applied(false);
+// 源安装包路径
+std::string apk;
+// 数据包版本
+int app_version;
+// OBB名称
+std::string ori_rsb_name;
+// OBB专属文件夹路径
+std::string rsb_path_str;
+// OBB路径
+std::string rsb_self_path_str;
+// AndroidManifest.xml信息
+std::vector<uint8_t> manifest;
+// 应用信息
+AppInfo info;
+// 安装包内数据包哈希值
+uint64_t apkOBBHash;
+// 数据包哈希值
+uint64_t OBBHash;
+
+// 让主程序延迟防止数据包迁移期间被读取（可放在除了Log输出函数以外的任一hook函数调用旧函数之前）
+void dalay_hook() {
+  while (thread_applied) {
+    LOGI("RSB first loaded, sleeping......");
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  }
+}
+
+// 数据分块
+void copy_chunk(const std::filesystem::path &src, const std::filesystem::path &dst, uint64_t offset,
+                uint64_t size) {
+  const size_t BUF_SIZE = 64ull * 1024 * 1024;  // 512MB
+
+  std::ifstream in(src, std::ios::binary);
+  std::fstream out(dst, std::ios::binary | std::ios::in | std::ios::out);
+  in.seekg(offset);
+  out.seekp(offset);
+
+  std::vector<char> buffer(std::min<uint64_t>(BUF_SIZE, size));
+  uint64_t remaining = size;
+  while (remaining > 0) {
+    size_t to_read = std::min<uint64_t>(buffer.size(), remaining);
+
+    in.read(buffer.data(), to_read);
+    out.write(buffer.data(), to_read);
+
+    remaining -= to_read;
+  }
+}
+
+// 分块迁移函数
+bool copy_file_parallel(const std::filesystem::path &src, const std::filesystem::path &dst,
+                        int threads) {
+  uint64_t file_size = std::filesystem::file_size(src);
+
+  // 预创建目标文件
+  {
+    std::ofstream out(dst, std::ios::binary | std::ios::trunc);
+    out.seekp(file_size - 1);
+    out.write("", 1);
+  }
+
+  uint64_t chunk = file_size / threads;
+  std::vector<std::thread> workers;
+  for (int i = 0; i < threads; i++) {
+    uint64_t offset = i * chunk;
+    uint64_t size = (i == threads - 1) ? (file_size - offset) : chunk;
+    workers.emplace_back(copy_chunk, src, dst, offset, size);
+  }
+  for (auto &t : workers)
+    t.join();
+
+  return true;
+}
+
+// RSB迁移期间防止主线程读取函数（大概率无法一次载入因为res头读取比RSB读取要早..........）
+void safe_pipe_copy(const std::string &src_path, const std::string &target_path) {
+  // 1. 如果路径已存在普通文件，先删掉，否则没法建管道
+  unlink(target_path.c_str());
+
+  // 2. 创建管道 (FIFO)
+  if (mkfifo(target_path.c_str(), 0666) != 0) {
+    // 如果创建失败（比如权限问题），退回到普通拷贝作为保底
+    std::filesystem::copy(src_path, target_path, std::filesystem::copy_options::overwrite_existing);
+    return;
+  }
+
+  // 3. 打开管道准备写入 (注意：如果主线程没来读，这里会阻塞)
+  // 建议在子线程执行，这样不会卡死你的 Mod 初始化
+  int fifo_fd = open(target_path.c_str(), O_WRONLY);
+  if (fifo_fd < 0)
+    return;
+
+  // 4. 分块读写数据
+  std::ifstream src(src_path, std::ios::binary);
+  std::vector<char> buffer(1024 * 1024);  // 每次 64KB，正好是典型 Linux 管道的大小
+
+  while (src.read(buffer.data(), buffer.size()) || src.gcount() > 0) {
+    ssize_t count = src.gcount();
+    // 这一步会根据主线程的读取速度自动“限速”
+    if (write(fifo_fd, buffer.data(), count) == -1)
+      break;
+  }
+
+  // 5. 关键：关闭管道，主线程才会收到 EOF 并结束读取
+  close(fifo_fd);
+  src.close();
+
+  // 6. 可选：任务彻底完成后删除管道（或者留着下次用）
+  unlink(target_path.c_str());
+}
+
+// 获取游戏包名
+std::string get_package_name() {
+  std::ifstream cmdline("/proc/self/cmdline");
+  std::string package_name;
+  std::getline(cmdline, package_name, '\0');  // cmdline以\0结尾
+  return package_name;
+}
+
+// 获取so所在文件夹
+std::string get_so_parent_dir() {
+  std::ifstream maps("/proc/self/maps");
+  std::string line;
+  while (std::getline(maps, line)) {
+    if (line.find("libRestructedLogic.so") != std::string::npos) {
+      size_t path_start = line.find_last_of(' ') + 1;
+      std::string full_path = line.substr(path_start);
+      // 去掉末尾换行符并返回父目录
+      return std::filesystem::path(full_path).parent_path().string();
+    }
+  }
+  return "";
+}
+
+// 获取base.apk路径
+std::string find_apk_path() {
+  return (std::filesystem::path(get_so_parent_dir()).parent_path().parent_path()).string() +
+         "/base.apk";
+}
+
+// 读取AndroidManifest.axml
+std::vector<uint8_t> read_manifest(const std::string &apk) {
+  std::vector<uint8_t> result;
+  ApkUnzipper::extract_to_memory(apk, "AndroidManifest.xml", result);
+  return result;
+}
+
+AppInfo get_app_info() {
+  apk = find_apk_path();
+  LOGI("APK LOACTION:%s", apk.c_str());
+  manifest = read_manifest(apk);
+  return parse_manifest(manifest.data(), manifest.size());
+}
+
+int get_apk_versioncode() {
+  info = get_app_info();
+  LOGI("package=%s", info.package.c_str());
+  LOGI("versionName=%s", info.versionName.c_str());
+  LOGI("versionCode=%d", info.versionCode);
+  LOGI("minSdk=%d", info.minSdk);
+  LOGI("targetSdk=%d", info.targetSdk);
+  return info.versionCode;
+}
+
+// OBB文件夹是否存在
+bool OBBPathExisted() {
+  app_version = get_apk_versioncode();
+  rsb_path_str = "/storage/emulated/0/Android/obb/" + get_package_name();
+  std::filesystem::path rsb_real_path = std::filesystem::path(rsb_path_str);
+  if (std::filesystem::exists(rsb_real_path))
+    return 1;
+  return 0;
+}
+
+// OBB是否存在
+bool OBBExisted() {
+  app_version = get_apk_versioncode();
+  ori_rsb_name = "main." + std::to_string(app_version) + "." + get_package_name() + ".obb";
+  rsb_path_str = "/storage/emulated/0/Android/obb/" + get_package_name();
+  rsb_self_path_str = rsb_path_str + "/" + ori_rsb_name;
+  std::filesystem::path rsb_self_path = std::filesystem::path(rsb_self_path_str);
+  if (std::filesystem::exists(rsb_self_path))
+    return 1;
+  return 0;
+}
+
+// 验证头部四字节
+//  检查文件头是否为特定的四个字符
+bool check_magic_number(const char *path, const char *magic) {
+  FILE *fp = fopen(path, "rb");
+  if (!fp)
+    return false;
+
+  char buffer[4];
+  size_t count = fread(buffer, 1, 4, fp);
+  fclose(fp);
+
+  if (count != 4)
+    return false;
+
+  // 对比前 4 字节
+  return memcmp(buffer, magic, 4) == 0;
+}
+
+// 验证哈希值是否相等
+bool OBBHashEquals() {
+  LOGI("Hash Start");
+  app_version = get_apk_versioncode();
+  ori_rsb_name = "main." + std::to_string(app_version) + "." + get_package_name() + ".obb";
+  rsb_path_str = "/storage/emulated/0/Android/obb/" + get_package_name();
+  rsb_self_path_str = rsb_path_str + "/" + ori_rsb_name;
+  // apk内数据包哈希值
+  apkOBBHash = HashComparer::get_asset_hash(apk, "assets/" + ori_rsb_name);
+  if (apkOBBHash == 0) {
+    LOGI("哈希校验：非直装包");
+    return true;
+  }
+  if (check_magic_number(rsb_self_path_str.c_str(), "EBRL")) {
+    LOGI("检测到EBRL，读取后续哈希值");
+    OBBHash = HashComparer::read_hash_after_header(rsb_self_path_str.c_str());
+  } else {
+    // 如果大小不一，直接就是不一样
+    if (ApkUnzipper::get_apk_asset_size(apk, "assets/" + ori_rsb_name) !=
+        std::filesystem::file_size(std::filesystem::path(rsb_self_path_str))) {
+      LOGI("文件大小不一，必然不同");
+      return false;
+    }
+    OBBHash = HashComparer::compute_file_hash(std::filesystem::path(rsb_self_path_str));
+  }
+  bool result = HashComparer::are_hashes_identical(apkOBBHash, OBBHash);
+  LOGI("Hash End");
+  return result;
+}
+
+// Assets版直装转移
+bool AssetsRSBDirectInstall() {
+  apk = find_apk_path();
+  app_version = get_apk_versioncode();
+  ori_rsb_name = "main." + std::to_string(app_version) + "." + get_package_name() + ".obb";
+  rsb_path_str = "/storage/emulated/0/Android/obb/" + get_package_name();
+  rsb_self_path_str = rsb_path_str + "/" + ori_rsb_name;
+  LOGI("ori_rsb_name = %s,rsb_path_str = %s,rsb_self_path_str = %s", ori_rsb_name.c_str(),
+       rsb_path_str.c_str(), rsb_self_path_str.c_str());
+  // 提取并放置OBB
+  if (ApkUnzipper::extract_asset(apk, "assets/" + ori_rsb_name, rsb_self_path_str)) {
+    // 权限修复
+    std::filesystem::permissions(
+        rsb_self_path_str, std::filesystem::perms::owner_all | std::filesystem::perms::group_read);
+    return 1;
+  } else {
+    LOGI("不是直装包");
+    return 0;
+  }
+}
+
+// 线程监控OBB路径是否存在
+void obb_path_monitor() {
+  while (true) {
+    if (OBBPathExisted()) {
+      thread_applied = true;
+      LOGI("RSBDirectInstall Start.");
+      AssetsRSBDirectInstall();
+      LOGI("RSBDirectInstall End.");
+      if (OBBExisted() || OBBHashEquals()) {
+        // 成功迁移
+        thread_applied = false;
+      }
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  }
+}
+
+bool available = 0;
+
+inline void process() {
+  available = 1;
+  // 必须留，获取包名和版本号信息
+  if (!apkinforeaded.exchange(true))
+    get_apk_versioncode();
+  // 直装包：数据包不存在或者哈希校验不通过则轮询路径是否存在
+  if (!OBBExisted() || !OBBHashEquals())
+    std::thread(obb_path_monitor).detach();
+}
+}  // namespace DirectInstallOBB
 
 #if GAME_VERSION < 1031
 
@@ -29,7 +316,7 @@ std::vector<Sexy::SexyString> g_modPlantTypenames;
 #define REGISTER_PLANT_TYPENAME(typename) g_modPlantTypenames.push_back(typename);
 
 typedef PlantNameMapper *(*PlantNameMapperCtor)(PlantNameMapper *);
-PlantNameMapperCtor oPlantNameMapperCtor = NULL;
+PlantNameMapperCtor oPlantNameMapperCtor = nullptr;
 
 void *hkCreatePlantNameMapper(PlantNameMapper *self) {
   oPlantNameMapperCtor(self);
@@ -55,25 +342,169 @@ inline void process() {
 
 #endif
 
-namespace PrimeGlyphCacheLimitation {
-typedef uint *(*PrimeGlyphCacheLimitation)(uint *, int, int, int);
-PrimeGlyphCacheLimitation oPrimeGlyphCacheLimitation = NULL;
+namespace LogOutput {
+typedef int (*LogOutputFunc)(char *, ...);
+LogOutputFunc oLogOutputFunc = nullptr;
+std::mutex g_logMutex;
 
-// 一路：高端设备缓冲大小为2048，中端设备为1024，低端设备为512。经过测试，缓冲大小最大只能设为2048，设为更高值，会导致进入游戏后文字渲染全为空白，这与设为0的效果一致。
-uint *hkPrimeGlyphCacheLimitation(uint *a1, int a2, int a3, int a4) {
-  uint *result = oPrimeGlyphCacheLimitation(a1, a2, a3, a4);
-  a1[22] = 2048;
-  LOGI("Hooked sub_177ECF4: Modified a1[22] to %d", a1[22]);
+int hkLogOutputFunc(char *format, ...) {
+  DirectInstallOBB::dalay_hook();
+
+  va_list va;
+  va_start(va, format);
+
+#ifdef _DEBUG
+
+  std::lock_guard<std::mutex> lock(g_logMutex);
+  LOGI("LogOutputFunc: ");
+  LOGI(format, va);
+
+#endif
+
+  int result = oLogOutputFunc(format, va);
+  va_end(va);
   return result;
 }
 
-inline void process() {
-  if constexpr (PrimeGlyphCacheAddr != UNKNOWN)
-    PVZ2HookFunction(PrimeGlyphCacheAddr, (void *)hkPrimeGlyphCacheLimitation,
-                     (void **)&oPrimeGlyphCacheLimitation,
-                     "PrimeGlyphCache::PrimeGlyphCacheLimitation");
+typedef int (*LogOutputFunc_Simple)(const char *);
+LogOutputFunc_Simple oLogOutputFunc_Simple = nullptr;
+std::mutex g_logMutex_Simple;
+
+int hkLogOutputFunc_Simple(const char *text) {
+  // 预检逻辑（模仿 IDA 中的 if(!v2)）
+  if (text && *text != '\0') {
+    std::lock_guard<std::mutex> lock(g_logMutex_Simple);
+    // 直接打印传入的字符串，无需 vsnprintf，因为这不是可变参数函数
+    LOGI("LogOutputFunc_Simple: %s", text);
+  }
+  // 调用原函数
+  return oLogOutputFunc_Simple(text);
 }
-}  // namespace PrimeGlyphCacheLimitation
+
+// 参数是 int (寄存器 r0)，在 Hook 中我们定义为 void* 或 long
+typedef int (*LogOutputFunc_Struct)(void *);
+LogOutputFunc_Struct oLogOutputFunc_Struct = nullptr;
+std::mutex g_logMutex_Struct;
+
+int hkLogOutputFunc_Struct(void *result) {
+  if (result) {
+    const char *v1 = NULL;
+    // 模仿 IDA 逻辑：检查标志位
+    // 如果 (*(unsigned char*)result & 1) != 0
+    if ((*((unsigned char *)result) & 1) != 0) {
+      // 长字符串逻辑：从偏移 8 处取指针
+      v1 = *(const char **)((uint)result + 8);
+    } else {
+      // 短字符串逻辑：从偏移 1 处取内容
+      v1 = (const char *)((uint)result + 1);
+    }
+    // 如果指针不为空且内容不为空字符串
+    if (v1 && *v1 != '\0') {
+      std::lock_guard<std::mutex> lock(g_logMutex_Struct);
+      LOGI("LogOutputFunc_Struct: %s", v1);
+    }
+  }
+  // 调用原函数并返回其结果
+  return oLogOutputFunc_Struct(result);
+}
+
+typedef int (*LogOutputFunc_v2)(int a1, ...);
+LogOutputFunc_v2 oLogOutputFunc_v2 = nullptr;
+std::mutex g_logMutex_v2;
+
+int hkLogOutputFunc_v2(int a1, ...) {
+  va_list va;
+  va_start(va, a1);
+  const char *format = (const char *)a1;
+
+#ifdef _DEBUG
+
+  std::lock_guard<std::mutex> lock(g_logMutex);
+  LOGI("LogOutputFunc_v2: ");
+  LOGI(format, va);
+
+#endif
+
+  int result = oLogOutputFunc_v2(a1, va);
+  va_end(va);
+  return result;
+}
+
+void process() {
+#ifdef _DEBUG
+
+  // 输出简要日志
+  if constexpr (LogOutputFuncAddr_Simple != UNKNOWN)
+    PVZ2HookFunction(LogOutputFuncAddr_Simple, (void *)hkLogOutputFunc_Simple,
+                     (void **)&oLogOutputFunc_Simple, "LogOutputFunc_Simple");
+  // 输出主日志
+  if constexpr (LogOutputFuncAddr != UNKNOWN)
+    PVZ2HookFunction(LogOutputFuncAddr, (void *)hkLogOutputFunc, (void **)&oLogOutputFunc,
+                     "LogOutputFunc");
+  // 输出结构日志
+  if constexpr (LogOutputFuncAddr_Struct != UNKNOWN)
+    PVZ2HookFunction(LogOutputFuncAddr_Struct, (void *)hkLogOutputFunc_Struct,
+                     (void **)&oLogOutputFunc_Struct, "LogOutputFunc_Struct");
+  // 输出v2日志
+  if constexpr (LogOutputFuncAddr_v2 != UNKNOWN)
+    PVZ2HookFunction(LogOutputFuncAddr_v2, (void *)hkLogOutputFunc_v2, (void **)&oLogOutputFunc_v2,
+                     "LogOutputFunc_v2");
+
+#else
+
+  // hook 主日志，用于卡死主进程供 obb 复制
+  if (DirectInstallOBB::available) {
+    static_assert(LogOutputFuncAddr != UNKNOWN);
+    PVZ2HookFunction(LogOutputFuncAddr, (void *)hkLogOutputFunc, (void **)&oLogOutputFunc,
+                     "LogOutputFunc");
+  }
+
+#endif
+}
+}  // namespace LogOutput
+
+namespace CDNExpansion {
+// 在此感谢CZ的技术专栏分享，我将变量名和一些方式进行了小小的改变，但依旧需要对其为技术的分享表达感谢！！！！！
+typedef int (*CDNExpand)(int *a1, const Sexy::SexyString &rtonName, int rtonTable, int a4);
+CDNExpand oCDNLoad = nullptr;
+
+std::atomic<bool> executed(false);
+
+void hkCDNLoad(int *a1, const Sexy::SexyString &rtonName, int rtonTable, int a4) {
+  // 至于这个偏移怎么查.........很简单，HEX搜products.rton
+  // 然后根据products.rton的"p"的偏移地址，用ida pro跳转到该地址
+  // 你会发现一堆的rton（绿色）右侧都用同一个DATA XREF地址跳转（引用偏移地址）
+  // 双击那个地址，你就会到达CZ讲的那个大函数，跳转后按F5，然后向下翻就能看到
+  // 那些rton下面都有同一个函数，就是那个函数需要hook
+  // 然后原理CZ讲过了，我也是直接拿来用，没啥丢脸的，有公开的好东西不用才是固执嘛......
+  // 不过，CZ拿64位演示，推荐的bb2和jay krow的32位工程，对于一些萌新来说可不友好哦......
+  // 原理很简单（如果这都要拿AI去查什么意思的话，那我可要数落你了啊）
+  // executed一开始为false，我们在塞入rton之前的第一步就是检测executed是否为true
+  // executed你可以比喻为一个罐子，打开了就是true，没打开就是false，我们只需要打开一次就不需要打开了
+  // 所以第一次我们打开之前，罐子是未开封状态，打开了就是开封状态
+  // 未开封状态我们要打开罐子拿出东西塞别的里面去，我们塞过之后就不需要再塞重复的了
+  // 所以一看到开封的状态我们就知道不需要在这个罐子里面拿东西了
+  // 所以executed在我们塞rton之前是false，塞rton时候就已经变true了，就不需要再塞了
+  if (!executed.exchange(true)) {
+    // 载入各版本RtonTableID
+    rtonTableIDsLoader();
+    LOGI("Rton Table IDs Load succeed.");
+    // 遍历载入
+    for (const auto &rtonfile : rtonTableIDs) {
+      oCDNLoad(a1, rtonfile.first, rtonfile.second, 1);
+      LOGI("%s:%d is loaded", (rtonfile.first).c_str(), rtonfile.second);
+    }
+  }
+  LOGI("%s:%d is loaded", rtonName.c_str(), rtonTable);
+  oCDNLoad(a1, rtonName, rtonTable, a4);
+}
+
+inline void process() {
+  // CDN读取rton，感谢CZ技术专栏分享技术！！！
+  if constexpr (CDNLoadAddr != UNKNOWN)
+    PVZ2HookFunction(CDNLoadAddr, (void *)hkCDNLoad, (void **)&oCDNLoad, "CDNLoadExpansion");
+}
+}  // namespace CDNExpansion
 
 namespace RSBPathChangeAndDecryptRSB {
 // C++11 兼容的编译期字符串混淆
@@ -206,6 +637,8 @@ bool isRooted() {
 
 // 临时文件路径列表
 static std::vector<std::string> g_tempFiles;
+
+// 清理临时文件
 void cleanupTempFiles() {
   for (const auto &path : g_tempFiles) {
     if (unlink(path.c_str()) == 0) {
@@ -223,12 +656,6 @@ RSBPathRecorder oRSBPathRecorder = nullptr;
 
 int hkRSBPathRecorder(uint *a1) {
   LOGI("Hooking RSBPathRecorder");
-
-  // 检查输入
-  if (!oRSBPathRecorder) {
-    LOGI("RSBPathRecorder: Original function is null");
-    return 0;
-  }
   if (!a1) {
     LOGI("RSBPathRecorder: a1 is null");
     return oRSBPathRecorder(a1);
@@ -268,9 +695,22 @@ int hkRSBPathRecorder(uint *a1) {
   }
   LOGI("RSBPathRecorder: Original path=%s", original_path.c_str());
 
+  // C++17新增优化
+  std::filesystem::path fsOriPath = original_path;
+  std::vector<std::string> path_components;
+  // 存入路径上各文件夹名称
+  for (const auto &part : fsOriPath) {
+    if (!part.empty() && part != "/") {
+      path_components.push_back(part.string());
+    }
+  }
+  // 获取包名
+  std::string pack_name = path_components[path_components.size() - 2];
+  // 获取数据包名
+  std::string rsb_name = path_components[path_components.size() - 1];
+
   // 验证预期路径，可改，改成你的改版路径即可，不改也没影响！！！！！！！！！！！！
-  std::string expected_path =
-      "/storage/emulated/0/Android/obb/com.ea.game.pvz2_na/main.763.com.ea.game.pvz2_na.obb";
+  std::string expected_path = "/storage/emulated/0/Android/obb/" + pack_name + "/" + rsb_name;
   if (original_path != expected_path) {
     LOGI("RSBPathRecorder: Path mismatch, expected %s", expected_path.c_str());
     // 继续处理，允许非预期路径
@@ -278,12 +718,12 @@ int hkRSBPathRecorder(uint *a1) {
 
   LOGI("RSB_TRACE: Starting Hybrid Mmap-Stream Process...");
 
-  // 一定要改！！！！！把你的地址改成/data/user/0/com.ea.game.pvz2_改版名/files！！！！！
-  std::string cache_dir =
-      "/data/user/0/com.ea.game.pvz2_row/files";  /// storage/emulated/0/Android/data/com.ea.game.pvz2_row/cache
+  // 一定要改！！！！！把你的地址改成/data/data/com.ea.game.pvz2_改版名/files！！！！！
+  std::string cache_dir = "/data/data/" + pack_name +
+                          "/files";  /// storage/emulated/0/Android/data/com.ea.game.pvz2_row/cache
   makePath(cache_dir);
   // 这个地方可以随意写，这样别人就认不出来了
-  std::string temp_path = cache_dir + "/.cache_data_file";
+  std::string temp_path = cache_dir + "/.cache_file";
 
   // 2. 检测 1bsr (保持不变)
   int src_fd = open(original_path.c_str(), O_RDONLY);
@@ -293,8 +733,6 @@ int hkRSBPathRecorder(uint *a1) {
     read(src_fd, magic, 4);
     if (memcmp(magic, "1bsr", 4) == 0) {
       LOGI("RSB_TRACE: Detected 1bsr, skipping...");
-      // 原逻辑是把未加密数据包也放临时路径，目前看来已经不必要
-      // 毕竟只有改版作者才拥有未加密数据包，再迁移不仅浪费时间还让作者得不到出问题的是哪个包（被隐藏了）
       return result;
     }
     if (memcmp(magic, "EBRL", 4) == 0 && isRooted()) {
@@ -394,11 +832,12 @@ int hkRSBPathRecorder(uint *a1) {
       close(dst_fd);
 
       LOGI("RSB_TRACE: All Done. Optimized Path Taken.");
-      // 没必要清理临时数据了，因为现在的临时通道作为隐藏通道来使用，而加密数据包会被干掉，做到一次解密终生秒进
+
       // 重写数据包头部为EBRL
       if (!isRooted()) {
         // 没ROOT重写数据包头
-        if (!maskFileHeader(original_path.c_str(), "EBRL")) {
+        if (!HashComparer::generate_hash_file_with_header(original_path.c_str(),
+                                                          original_path.c_str(), "EBRL")) {
           // 重写失败报错
           LOGI("RSB_TRACE: EBRL overrides failed.");
           return result;
@@ -412,8 +851,6 @@ int hkRSBPathRecorder(uint *a1) {
         LOGI("RSB_TRACE: Warning! Device rooted.");
       }
     }
-  } else {
-    /*return result;*/
   }
 
   // 替换路径
@@ -423,12 +860,7 @@ int hkRSBPathRecorder(uint *a1) {
     return result;
   }
   size_t new_path_len = strlen(new_path);
-  // if (a1[0] & 1) {
-  //     a1[2] = (uint)new_path; // 动态分配，替换 a1[2]
-  // }
-  // else {
-  //     a1[1] = (uint)new_path; // 非动态分配，替换 a1[1]
-  // }
+
   if (a1[0] & 1) {
     // 动态分配
     if (a1[2]) {
@@ -451,7 +883,7 @@ int hkRSBPathRecorder(uint *a1) {
 
 // ROOT 检测
 typedef int (*ResourceManagerFunc)(int, int, int);
-ResourceManagerFunc oResourceManagerFunc = NULL;
+ResourceManagerFunc oResourceManagerFunc = nullptr;
 int hkResourceManagerFunc(int a1, int a2, int a3) {
   LOGI("Hooking ResourcesManagerFunc 6EE218");
   LOGI("a1=%d, a2=%d, a3=%d", a1, a2, a3);
@@ -466,232 +898,36 @@ int hkResourceManagerFunc(int a1, int a2, int a3) {
 }
 
 inline void process() {
-  // Hook RSB 读取函数
-  if constexpr (RSBPathRecorderAddr != UNKNOWN)
+  if constexpr (RSBPathRecorderAddr != UNKNOWN && ResourceManagerFuncAddr != UNKNOWN) {
+    // Hook RSB 读取函数
     PVZ2HookFunction(RSBPathRecorderAddr, (void *)hkRSBPathRecorder, (void **)&oRSBPathRecorder,
                      "ResourceManager::RSBPathRecorder");
-  // ROOT 检测
-  if constexpr (ResourceManagerFuncAddr != UNKNOWN)
+    // ROOT 检测
     PVZ2HookFunction(ResourceManagerFuncAddr, (void *)hkResourceManagerFunc,
                      (void **)&oResourceManagerFunc, "ResourceManager::ResourceManagerFunc");
+  }
 }
 }  // namespace RSBPathChangeAndDecryptRSB
 
-namespace CDNExpansion {
-// 在此感谢CZ的技术专栏分享，我将变量名和一些方式进行了小小的改变，但依旧需要对其为技术的分享表达感谢！！！！！
-typedef int (*CDNExpand)(int *a1, const Sexy::SexyString &rtonName, int rtonTable, int a4);
-CDNExpand oCDNLoad = NULL;
+namespace PrimeGlyphCacheLimitation {
+typedef uint *(*PrimeGlyphCacheLimitation)(uint *, int, int, int);
+PrimeGlyphCacheLimitation oPrimeGlyphCacheLimitation = nullptr;
 
-std::atomic<bool> executed(false);
-
-void hkCDNLoad(int *a1, const Sexy::SexyString &rtonName, int rtonTable, int a4) {
-  if (!oCDNLoad) {
-    LOGI("Rton Table IDs Old Load failed.");
-    return;
-  }
-  // 至于这个偏移怎么查.........很简单，HEX搜products.rton
-  // 然后根据products.rton的"p"的偏移地址，用ida pro跳转到该地址
-  // 你会发现一堆的rton（绿色）右侧都用同一个DATA XREF地址跳转（引用偏移地址）
-  // 双击那个地址，你就会到达CZ讲的那个大函数，跳转后按F5，然后向下翻就能看到
-  // 那些rton下面都有同一个函数，就是那个函数需要hook
-  // 然后原理CZ讲过了，我也是直接拿来用，没啥丢脸的，有公开的好东西不用才是固执嘛......
-  // 不过，CZ拿64位演示，推荐的bb2和jay krow的32位工程，对于一些萌新来说可不友好哦......
-  // 原理很简单（如果这都要拿AI去查什么意思的话，那我可要数落你了啊）
-  // executed一开始为false，我们在塞入rton之前的第一步就是检测executed是否为true
-  // executed你可以比喻为一个罐子，打开了就是true，没打开就是false，我们只需要打开一次就不需要打开了
-  // 所以第一次我们打开之前，罐子是未开封状态，打开了就是开封状态
-  // 未开封状态我们要打开罐子拿出东西塞别的里面去，我们塞过之后就不需要再塞重复的了
-  // 所以一看到开封的状态我们就知道不需要在这个罐子里面拿东西了
-  // 所以executed在我们塞rton之前是false，塞rton时候就已经变true了，就不需要再塞了
-  if (!executed.exchange(true)) {
-    // 载入各版本RtonTableID
-    rtonTableIDsLoader();
-    LOGI("Rton Table IDs Load succeed.");
-    // 遍历载入
-    for (const auto &rtonfile : rtonTableIDs) {
-      oCDNLoad(a1, rtonfile.first, rtonfile.second, 1);
-      LOGI("%s:%d is loaded", (rtonfile.first).c_str(), rtonfile.second);
-    }
-  }
-  LOGI("%s:%d is loaded", rtonName.c_str(), rtonTable);
-  oCDNLoad(a1, rtonName, rtonTable, a4);
+// 一路：高端设备缓冲大小为2048，中端设备为1024，低端设备为512。经过测试，缓冲大小最大只能设为2048，设为更高值，会导致进入游戏后文字渲染全为空白，这与设为0的效果一致。
+uint *hkPrimeGlyphCacheLimitation(uint *a1, int a2, int a3, int a4) {
+  uint *result = oPrimeGlyphCacheLimitation(a1, a2, a3, a4);
+  a1[22] = 2048;
+  LOGI("Hooked sub_177ECF4: Modified a1[22] to %d", a1[22]);
+  return result;
 }
 
 inline void process() {
-  // CDN读取rton，感谢CZ技术专栏分享技术！！！
-  if constexpr (CDNLoadAddr != UNKNOWN)
-    PVZ2HookFunction(CDNLoadAddr, (void *)hkCDNLoad, (void **)&oCDNLoad, "CDNLoadExpansion");
+  if constexpr (PrimeGlyphCacheAddr != UNKNOWN)
+    PVZ2HookFunction(PrimeGlyphCacheAddr, (void *)hkPrimeGlyphCacheLimitation,
+                     (void **)&oPrimeGlyphCacheLimitation,
+                     "PrimeGlyphCache::PrimeGlyphCacheLimitation");
 }
-}  // namespace CDNExpansion
-
-namespace LogOutput {
-typedef int (*LogOutputFunc)(char *, ...);
-LogOutputFunc oLogOutputFunc = NULL;
-std::mutex g_logMutex;
-
-int hkLogOutputFunc(char *format, ...) {
-  if (!oLogOutputFunc) {
-    LOGI("LogOutputFunc: Original function pointer is null");
-    return -1;
-  }
-
-  std::lock_guard<std::mutex> lock(g_logMutex);
-
-  va_list va, va_copy;
-  va_start(va, format);
-  va_copy(va_copy, va);
-
-  // 计算所需长度
-  char temp[1];
-  int len = vsnprintf(temp, 0, format, va);
-  va_end(va);
-
-  va_start(va, format);
-  char *buffer;
-  if (len >= 0 && len < 1024) {
-    buffer = new char[1024];
-    len = vsnprintf(buffer, 1024, format, va);
-    buffer[len] = '\0';
-    LOGI("LogOutputFunc: %s", buffer);
-  } else if (len >= 0) {
-    buffer = new char[len + 1];
-    len = vsnprintf(buffer, len + 1, format, va);
-    buffer[len] = '\0';
-    LOGI("LogOutputFunc: %s", buffer);
-  } else {
-    LOGI("LogOutputFunc: Failed to format, format=%s, len=%d", format ? format : "null", len);
-    return -1;
-  }
-
-  int result = oLogOutputFunc(format, va_copy);
-  va_end(va_copy);
-  va_end(va);
-  delete[] buffer;
-  return result;
-}
-
-typedef int (*LogOutputFunc_Simple)(const char *);
-LogOutputFunc_Simple oLogOutputFunc_Simple = NULL;
-std::mutex g_logMutex_Simple;
-
-int hkLogOutputFunc_Simple(const char *text) {
-  if (!oLogOutputFunc_Simple) {
-    LOGI("LogOutputFunc_Simple: Original function pointer is null");
-    return -1;
-  }
-  // 预检逻辑（模仿 IDA 中的 if(!v2)）
-  if (text && *text != '\0') {
-    std::lock_guard<std::mutex> lock(g_logMutex_Simple);
-    // 直接打印传入的字符串，无需 vsnprintf，因为这不是可变参数函数
-    LOGI("LogOutputFunc_Simple: %s", text);
-  }
-  // 调用原函数
-  return oLogOutputFunc_Simple(text);
-}
-
-// 参数是 int (寄存器 r0)，在 Hook 中我们定义为 void* 或 long
-typedef int (*LogOutputFunc_Struct)(void *);
-LogOutputFunc_Struct oLogOutputFunc_Struct = NULL;
-std::mutex g_logMutex_Struct;
-
-int hkLogOutputFunc_Struct(void *result) {
-  if (!oLogOutputFunc_Struct) {
-    LOGI("LogOutputFunc_Struct: Original function pointer is null");
-    return -1;
-  }
-
-  if (result) {
-    const char *v1 = NULL;
-    // 模仿 IDA 逻辑：检查标志位
-    // 如果 (*(unsigned char*)result & 1) != 0
-    if ((*((unsigned char *)result) & 1) != 0) {
-      // 长字符串逻辑：从偏移 8 处取指针
-      v1 = *(const char **)((uint)result + 8);
-    } else {
-      // 短字符串逻辑：从偏移 1 处取内容
-      v1 = (const char *)((uint)result + 1);
-    }
-    // 如果指针不为空且内容不为空字符串
-    if (v1 && *v1 != '\0') {
-      std::lock_guard<std::mutex> lock(g_logMutex_Struct);
-      LOGI("LogOutputFunc_Struct: %s", v1);
-    }
-  }
-  // 调用原函数并返回其结果
-  return oLogOutputFunc_Struct(result);
-}
-
-typedef int (*LogOutputFunc_v2)(int a1, ...);
-LogOutputFunc_v2 oLogOutputFunc_v2 = NULL;
-std::mutex g_logMutex_v2;
-
-int hkLogOutputFunc_v2(int a1, ...) {
-  if (!oLogOutputFunc_v2) {
-    LOGI("LogOutputFunc_v2: Original function pointer is null");
-    return -1;
-  }
-
-  std::lock_guard<std::mutex> lock(g_logMutex_v2);
-
-  va_list va, va_copy;
-  va_start(va, a1);
-  va_copy(va_copy, va);
-
-  // 1. 尝试格式化字符串用于拦截打印
-  // 注意：a1 在这里通常是 format 字符串的指针
-  const char *format = (const char *)a1;
-  char *buffer = nullptr;
-  // 计算所需长度
-  char temp[1];
-  int len = vsnprintf(temp, 0, format, va);
-  va_end(va);
-
-  if (len >= 0) {
-    // 分配内存并格式化
-    int buf_size = (len < 1024) ? 1024 : (len + 1);
-    buffer = new char[buf_size];
-
-    va_start(va, a1);
-    vsnprintf(buffer, buf_size, format, va);
-    va_end(va);
-
-    // 输出到我们的日志
-    LOGI("LogOutputFunc_v2: %s", buffer);
-  } else {
-    LOGI("LogOutputFunc_v2: Failed to format, a1=%p", (void *)a1);
-  }
-
-  // 2. 调用原始函数
-  // 同样注意：C语言中无法直接将 va_list 传给 ...，这里取决于你的 Hook 框架支持
-  // 如果是 Dobby/Substrate，通常建议转发参数
-  int result = oLogOutputFunc_v2(a1, va_copy);
-
-  va_end(va_copy);
-  if (buffer)
-    delete[] buffer;
-
-  return result;
-}
-
-void process() {
-  // 输出简要日志
-  if constexpr (LogOutputFuncAddr_Simple != UNKNOWN)
-    PVZ2HookFunction(LogOutputFuncAddr_Simple, (void *)hkLogOutputFunc_Simple,
-                     (void **)&oLogOutputFunc_Simple, "LogOutputFunc_Simple");
-  // 输出主日志
-  if constexpr (LogOutputFuncAddr != UNKNOWN)
-    PVZ2HookFunction(LogOutputFuncAddr, (void *)hkLogOutputFunc, (void **)&oLogOutputFunc,
-                     "LogOutputFunc");
-  // 输出结构日志
-  if constexpr (LogOutputFuncAddr_Struct != UNKNOWN)
-    PVZ2HookFunction(LogOutputFuncAddr_Struct, (void *)hkLogOutputFunc_Struct,
-                     (void **)&oLogOutputFunc_Struct, "LogOutputFunc_Struct");
-  // 输出v2日志
-  if constexpr (LogOutputFuncAddr_v2 != UNKNOWN)
-    PVZ2HookFunction(LogOutputFuncAddr_v2, (void *)hkLogOutputFunc_v2, (void **)&oLogOutputFunc_v2,
-                     "LogOutputFunc_v2");
-}
-}  // namespace LogOutput
+}  // namespace PrimeGlyphCacheLimitation
 
 namespace MaxZoom {
 
@@ -730,14 +966,14 @@ int hkLawnAppScreenWidthHeight(int a1, int a2) {
   // 2. 根据偏移直接提取数据
   // 根据 sub_FFE7D0
 #ifdef _DEBUG
-  mOrigScreenWidth = *(int32_t *)(a1 + 1512);
+  mOrigScreenWidth = *(_DWORD *)(a1 + 1512);
 #endif
-  mOrigScreenHeight = *(int32_t *)(a1 + 1516);
+  mOrigScreenHeight = *(_DWORD *)(a1 + 1516);
 
   // 根据自身
-  mWidth = *(int32_t *)(a1 + 136);
+  mWidth = *(_DWORD *)(a1 + 136);
 #ifdef _DEBUG
-  mHeight = *(int32_t *)(a1 + 140);
+  mHeight = *(_DWORD *)(a1 + 140);
 #endif
 
   // 3. 输出日志
@@ -823,7 +1059,7 @@ int hkBoardZoom(int a1) {
   // 先跑原函数
   int result = oBoardZoom(a1);
   // 改变选卡时视野左边缘与棋盘左边缘的距离
-  *(int32_t *)(a1 + 880) = preGameRightLine - mWidth;
+  *(_DWORD *)(a1 + 880) = preGameRightLine - mWidth;
   return result;
 }
 
@@ -836,9 +1072,9 @@ int hkBoardZoom2(int a1) {
   // 缩放系数
   *(float *)(a1 + 860) = 1.0f;
   // 改变视野左边缘与棋盘左边缘的距离
-  *(int32_t *)(a1 + 824) = -(gameStartRightLine - mWidth);
+  *(_DWORD *)(a1 + 824) = -(gameStartRightLine - mWidth);
   // 顶部基准线
-  *(int32_t *)(a1 + 868) = (int32_t)mOrigScreenHeight;
+  *(_DWORD *)(a1 + 868) = (_DWORD)mOrigScreenHeight;
   return result;
 }
 
@@ -855,19 +1091,108 @@ inline void process() {
 }
 }  // namespace MaxZoom
 
+namespace WorldMapVerticalScrolling {
+// 本来我完全可以让你们每个版本都去找通用的三个偏移的，但是为了你们旧版本的，我采用条件编译了
+// 旧版只需要找一个偏移，而新版则需要找三个
+
+#if GAME_VERSION >= 1001
+
+// 新版需要hook三个函数，而且由于该死的内联，不能把函数全反编译了，所以直接暴力扩边界让它们强行切到垂直移动判定
+// 拖动函数:
+typedef int (*WorldMapScroll)(int, int, int);
+WorldMapScroll oWorldMapScroll = nullptr;
+int hkWorldMapScroll(int a1, int a2, int a3) {
+  *(int32_t *)(a1 + 312) = -1000000000;
+  *(int32_t *)(a1 + 316) = -1000000000;
+  *(int32_t *)(a1 + 320) = 2000000000;
+  *(int32_t *)(a1 + 324) = 2000000000;
+  int result = oWorldMapScroll(a1, a2, a3);
+  return result;
+}
+// 居中函数：
+typedef int (*KeepCenter)(int, uint *, bool);
+KeepCenter oKeepCenter = nullptr;
+int hkKeepCenter(int a1, uint *a2, bool a3) {
+  *(int32_t *)(a1 + 312) = -1000000000;
+  *(int32_t *)(a1 + 316) = -1000000000;
+  *(int32_t *)(a1 + 320) = 2000000000;
+  *(int32_t *)(a1 + 324) = 2000000000;
+  int result = oKeepCenter(a1, a2, true);
+  return result;
+}
+// 惯性函数：
+typedef int (*ScrollInertance)(int);
+ScrollInertance oScrollInertance = nullptr;
+int hkScrollInertance(int a1) {
+  *(int32_t *)(a1 + 312) = -1000000000;
+  *(int32_t *)(a1 + 316) = -1000000000;
+  *(int32_t *)(a1 + 320) = 2000000000;
+  *(int32_t *)(a1 + 324) = 2000000000;
+  int result = oScrollInertance(a1);
+  return result;
+}
+
+#else
+
+// 旧函数（10.0版本前有效）
+typedef int (*worldMapDoMovement)(void *, float, float, bool);
+worldMapDoMovement oWorldMapDoMovement = nullptr;
+
+// 是否移动
+bool g_allowVerticalMovement = true;
+
+int hkWorldMapDoMovement(void *map, float fX, float fY, bool allowVerticalMovement) {
+  LOGI("Doing map movement: fX - %f, fY - %f", fX, fY);
+  return oWorldMapDoMovement(map, fX, fY, g_allowVerticalMovement);
+}
+
+#endif
+
+inline void process() {
+#if GAME_VERSION >= 1001
+
+  if constexpr (WorldMapScrollAddr != UNKNOWN && KeepCenterAddr != UNKNOWN &&
+                ScrollInertanceAddr != UNKNOWN) {
+    // 拖动函数
+    PVZ2HookFunction(WorldMapScrollAddr, (void *)hkWorldMapScroll, (void **)&oWorldMapScroll,
+                     "WorldMap::WorldMapScroll");
+    // 居中函数
+    PVZ2HookFunction(KeepCenterAddr, (void *)hkKeepCenter, (void **)&oKeepCenter,
+                     "WorldMap::KeepCenter");
+    // 惯性函数
+    PVZ2HookFunction(ScrollInertanceAddr, (void *)hkScrollInertance, (void **)&oScrollInertance,
+                     "WorldMap::ScrollInertance");
+  }
+
+#else
+
+  if constexpr (WorldMapDoMovementAddr != UNKNOWN)
+    PVZ2HookFunction(WorldMapDoMovementAddr, (void *)hkWorldMapDoMovement,
+                     (void **)&oWorldMapDoMovement, "WorldMap::doMovement");
+
+#endif
+}
+}  // namespace WorldMapVerticalScrolling
+
 __attribute__((constructor)) void libRestructedLogic_ARM32__main() {
   LOGI("Initializing %s", LIB_TAG);
 
+  // DirectInstallOBB::process();
 #if GAME_VERSION < 1031
-  AliasToID::process();  // 添加植物 ID（疑似无效）
+  AliasToID::process();  // 添加植物 ID
 #endif
+
 #ifdef _DEBUG
   LogOutput::process();     // 输出日志
   CDNExpansion::process();  // 自定义 CDN 列表
+#else
+  if (DirectInstallOBB::available)
+    LogOutput::process();  // 用于卡死主进程供 obb 复制
 #endif
-  PrimeGlyphCacheLimitation::process();   // 修改字符缓冲区大小
   RSBPathChangeAndDecryptRSB::process();  // RSB 加密
+  PrimeGlyphCacheLimitation::process();   // 修改字符缓冲区大小
   MaxZoom::process();                     // 高视角
+  WorldMapVerticalScrolling::process();   // 地图垂直移动
 
   LOGI("Finished initializing");
 }

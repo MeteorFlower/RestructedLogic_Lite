@@ -1,8 +1,8 @@
-#include "memUtils.h"
-#include "Logging.h"
+#include "memUtils.hpp"
+#include "Logging.hpp"
 
-#include "x32/jni/include/Utils.h"
-#include "x32/jni/libs/Substrate/SubstrateHook.h"
+#include "x32/jni/include/Utils.hpp"
+#include "x32/jni/libs/Substrate/SubstrateHook.hpp"
 
 size_t g_libAddress = NULL;
 

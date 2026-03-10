@@ -8,7 +8,7 @@
 #endif
 
 constexpr size_t UNKNOWN = 0;
-#define GAME_VERSION 873
+#define GAME_VERSION 1031
 // 填入版本号，为去掉小数点的版本号
 // UNKNOWN 表示暂时未知
 
@@ -26,6 +26,10 @@ constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
 constexpr size_t LawnAppScreenWidthHeightAddr = 0x5A1454;
 constexpr size_t BoardZoomAddr = 0x6E467C;
 constexpr size_t BoardZoom2Addr = 0x6E4910;
+constexpr size_t WorldMapDoMovementAddr = UNKNOWN;
+constexpr size_t WorldMapScrollAddr = UNKNOWN;
+constexpr size_t KeepCenterAddr = UNKNOWN;
+constexpr size_t ScrollInertanceAddr = UNKNOWN;
 constexpr int firstFreePlantID = UNKNOWN;
 
 #endif
@@ -44,6 +48,10 @@ constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
 constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
 constexpr size_t BoardZoomAddr = UNKNOWN;
 constexpr size_t BoardZoom2Addr = UNKNOWN;
+constexpr size_t WorldMapDoMovementAddr = 0x44E604;
+constexpr size_t WorldMapScrollAddr = UNKNOWN;
+constexpr size_t KeepCenterAddr = UNKNOWN;
+constexpr size_t ScrollInertanceAddr = UNKNOWN;
 constexpr int firstFreePlantID = 185;
 
 #endif
@@ -62,6 +70,10 @@ constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
 constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
 constexpr size_t BoardZoomAddr = UNKNOWN;
 constexpr size_t BoardZoom2Addr = UNKNOWN;
+constexpr size_t WorldMapDoMovementAddr = 0x441068;
+constexpr size_t WorldMapScrollAddr = 0x440E4C;
+constexpr size_t KeepCenterAddr = 0x446C08;
+constexpr size_t ScrollInertanceAddr = 0x45001C;
 constexpr int firstFreePlantID = 188;
 
 #endif
@@ -80,6 +92,10 @@ constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
 constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
 constexpr size_t BoardZoomAddr = UNKNOWN;
 constexpr size_t BoardZoom2Addr = UNKNOWN;
+constexpr size_t WorldMapDoMovementAddr = 0x483504;
+constexpr size_t WorldMapScrollAddr = UNKNOWN;
+constexpr size_t KeepCenterAddr = UNKNOWN;
+constexpr size_t ScrollInertanceAddr = UNKNOWN;
 constexpr int firstFreePlantID = 191;
 
 #endif
@@ -98,6 +114,10 @@ constexpr size_t LogOutputFuncAddr_v2 = 0x146E028;
 constexpr size_t LawnAppScreenWidthHeightAddr = 0x6E4030;
 constexpr size_t BoardZoomAddr = 0x88D3EC;
 constexpr size_t BoardZoom2Addr = 0x88D670;
+constexpr size_t WorldMapDoMovementAddr = UNKNOWN;
+constexpr size_t WorldMapScrollAddr = 0x523EF0;
+constexpr size_t KeepCenterAddr = 0x52ABDC;
+constexpr size_t ScrollInertanceAddr = 0x5359F4;
 constexpr int firstFreePlantID = UNKNOWN;  // 10.3 不需要
 
 #endif

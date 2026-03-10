@@ -19,7 +19,7 @@
 **/
 /* }}} */
 
-#include "SubstrateHook.h"
+#include "SubstrateHook.hpp"
 #include "SubstrateDebug.hpp"
 
 #include <stdint.h>

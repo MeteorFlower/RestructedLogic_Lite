@@ -15,12 +15,21 @@
     <ClCompile Include="Decrypt\aes.cpp">
       <Filter>Decrypt</Filter>
     </ClCompile>
+    <ClCompile Include="AXML\axml_parser.cpp">
+      <Filter>AXML</Filter>
+    </ClCompile>
+    <ClCompile Include="Unzip\miniz.cpp">
+      <Filter>Unzip</Filter>
+    </ClCompile>
+    <ClCompile Include="XXHash\xxhash.cpp">
+      <Filter>XXHash</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="RestructedLogic_ARM32_.h" />
-    <ClInclude Include="Logging.h" />
-    <ClInclude Include="memUtils.h" />
-    <ClInclude Include="x32\jni\include\Utils.h">
+    <ClInclude Include="RestructedLogic_ARM32_.hpp" />
+    <ClInclude Include="Logging.hpp" />
+    <ClInclude Include="memUtils.hpp" />
+    <ClInclude Include="x32\jni\include\Utils.hpp">
       <Filter>x32\jni\include</Filter>
     </ClInclude>
     <ClInclude Include="x32\jni\libs\Substrate\SubstrateARM.hpp">
@@ -29,33 +38,42 @@
     <ClInclude Include="x32\jni\libs\Substrate\SubstrateDebug.hpp">
       <Filter>x32\jni\libs\Substrate</Filter>
     </ClInclude>
-    <ClInclude Include="x32\jni\libs\Substrate\SubstrateHook.h">
+    <ClInclude Include="x32\jni\libs\Substrate\SubstrateHook.hpp">
       <Filter>x32\jni\libs\Substrate</Filter>
     </ClInclude>
     <ClInclude Include="x32\jni\libs\Substrate\SubstrateLog.hpp">
       <Filter>x32\jni\libs\Substrate</Filter>
     </ClInclude>
-    <ClInclude Include="x32\jni\libs\Substrate\SubstrateX86.hpp">
+    <ClInclude Include="x32\jni\libs\Substrate\table64.hpp">
       <Filter>x32\jni\libs\Substrate</Filter>
     </ClInclude>
-    <ClInclude Include="x32\jni\libs\Substrate\table64.h">
+    <ClInclude Include="x32\jni\libs\Substrate\CydiaSubstrate.hpp">
       <Filter>x32\jni\libs\Substrate</Filter>
     </ClInclude>
-    <ClInclude Include="x32\jni\libs\Substrate\Buffer.hpp">
-      <Filter>x32\jni\libs\Substrate</Filter>
-    </ClInclude>
-    <ClInclude Include="x32\jni\libs\Substrate\CydiaSubstrate.h">
-      <Filter>x32\jni\libs\Substrate</Filter>
-    </ClInclude>
-    <ClInclude Include="VersionSwitcher.h" />
-    <ClInclude Include="Decrypt\aes.h">
+    <ClInclude Include="VersionSwitcher.hpp" />
+    <ClInclude Include="Decrypt\aes.hpp">
       <Filter>Decrypt</Filter>
     </ClInclude>
-    <ClInclude Include="Decrypt\picosha2.h">
+    <ClInclude Include="Decrypt\picosha2.hpp">
       <Filter>Decrypt</Filter>
     </ClInclude>
-    <ClInclude Include="pch.h" />
-    <ClInclude Include="SexyTypes.h" />
+    <ClInclude Include="pch.hpp" />
+    <ClInclude Include="SexyTypes.hpp" />
+    <ClInclude Include="AXML\axml_parser.hpp">
+      <Filter>AXML</Filter>
+    </ClInclude>
+    <ClInclude Include="Unzip\HashComparer.hpp">
+      <Filter>Unzip</Filter>
+    </ClInclude>
+    <ClInclude Include="Unzip\miniz.hpp">
+      <Filter>Unzip</Filter>
+    </ClInclude>
+    <ClInclude Include="Unzip\ApkUnzipper.hpp">
+      <Filter>Unzip</Filter>
+    </ClInclude>
+    <ClInclude Include="XXHash\xxhash.hpp">
+      <Filter>XXHash</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="x32">
@@ -75,6 +93,15 @@
     </Filter>
     <Filter Include="Decrypt">
       <UniqueIdentifier>{998aadfa-bdd8-47a4-9248-7affc34d4eae}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="AXML">
+      <UniqueIdentifier>{8c3d46cb-8df8-4d19-a080-2ee82556d1bd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Unzip">
+      <UniqueIdentifier>{aa81ca88-b97e-40fc-a01b-6eff5844a5ba}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="XXHash">
+      <UniqueIdentifier>{c48abe1b-a678-4707-895a-3fb2d8d3ac54}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>
