@@ -14,6 +14,10 @@ RestructedLogic_Lite is a simplified version based on RestructedLogic. It remove
 
 - In-game Max Zoom Perspective. (高视角 in Chinese.)
 
+- Enable World Map vertical scrolling. (Both versions after and before 10.0 can be used.)
+
+- Directly install OBB when launch the game for the first time, instead of manually placing OBB.
+
 - Customize CDN read list (debug mode only).
 
 - Game log output (debug mode only).
