@@ -371,12 +371,12 @@ int mHeight;
 // LawnAppScreenWidthHeight 的原函数会随版本变化。目前只知道 8.7.3 的写法。其他版本欢迎补充。
 #if GAME_VERSION == 873
 
-typedef int64_t (*LawnAppScreenWidthHeight)(int64_t a1, int a2);
+typedef __int64 (*LawnAppScreenWidthHeight)(__int64 a1, int a2);
 LawnAppScreenWidthHeight oLawnAppScreenWidthHeight = nullptr;
 
-int64_t hkLawnAppScreenWidthHeight(int64_t a1, int a2) {
+__int64 hkLawnAppScreenWidthHeight(__int64 a1, int a2) {
   // 1. 先执行原函数，让内部逻辑完成内存写入
-  int64_t result = oLawnAppScreenWidthHeight(a1, a2);
+  __int64 result = oLawnAppScreenWidthHeight(a1, a2);
 
   if (a1 == NULL)
     return result;
@@ -414,29 +414,29 @@ result: %lld)",
 
 #endif
 
-typedef int64_t (*OrigBoardZoom)(int64_t a1);
+typedef __int64 (*OrigBoardZoom)(__int64 a1);
 OrigBoardZoom oBoardZoom = nullptr;
 
-int64_t hkBoardZoom(int64_t a1) {
+__int64 hkBoardZoom(__int64 a1) {
   // 先跑原函数
-  int64_t result = oBoardZoom(a1);
+  __int64 result = oBoardZoom(a1);
   // 改变选卡时视野左边缘与棋盘左边缘的距离
-  *(int32_t *)(a1 + 1140) = preGameRightLine - mWidth;
+  *(_DWORD *)(a1 + 1140) = preGameRightLine - mWidth;
   // 高度无法调整，只能靠缩放
   return result;
 }
 
-typedef void (*OrigBoardZoom2)(int64_t a1);
+typedef void (*OrigBoardZoom2)(__int64 a1);
 OrigBoardZoom2 oBoardZoom2 = nullptr;
 
-void hkBoardZoom2(int64_t a1) {
+void hkBoardZoom2(__int64 a1) {
   oBoardZoom2(a1);
   // 缩放系数
   *(float *)(a1 + 1120) = 1.0f;
   // 改变视野左边缘与棋盘左边缘的距离
-  *(int32_t *)(a1 + 1080) = -(gameStartRightLine - mWidth);
+  *(_DWORD *)(a1 + 1080) = -(gameStartRightLine - mWidth);
   // 顶部基准线
-  *(int32_t *)(a1 + 1128) = (int32_t)mOrigScreenHeight;
+  *(_DWORD *)(a1 + 1128) = (_DWORD)mOrigScreenHeight;
 }
 
 inline void process() {
