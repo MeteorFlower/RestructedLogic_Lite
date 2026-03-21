@@ -1021,7 +1021,7 @@ MINIZ_EXPORT void tinfl_decompressor_free(tinfl_decompressor *pDecomp);
 #endif
 
 /* Max size of LZ dictionary. */
-#define TINFL_LZ_DICT_SIZE 32768
+#define TINFL_LZ_DICT_SIZE (256 * 1024)
 
 /* Return status. */
 typedef enum {
@@ -1151,7 +1151,7 @@ extern "C" {
 enum {
   /* Note: These enums can be reduced as needed to save memory or stack space - they are pretty
      conservative. */
-  MZ_ZIP_MAX_IO_BUF_SIZE = 64 * 1024,
+  MZ_ZIP_MAX_IO_BUF_SIZE = 256 * 1024,
   MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE = 512,
   MZ_ZIP_MAX_ARCHIVE_FILE_COMMENT_SIZE = 512
 };

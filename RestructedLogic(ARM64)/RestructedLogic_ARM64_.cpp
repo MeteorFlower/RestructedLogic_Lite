@@ -12,7 +12,24 @@ using _DWORD = uint32_t;
 using __int64 = int64_t;
 using _BYTE = uint8_t;
 
+#pragma region IsRooted
+
+// 检测是否ROOT
+bool isRooted() {
+  // 检查常见的 Root 路径和文件
+  const char *paths[] = {"/system/app/Superuser.apk", "/sbin/su", "/system/bin/su",
+                         "/system/xbin/su"};
+  for (auto path : paths) {
+    if (access(path, F_OK) == 0)
+      return true;
+  }
+  return false;
+}
+
+#pragma endregion
+
 namespace DirectInstallOBB {
+bool exit_when_finished = false;
 // RSB迁移是否开始判定
 std::atomic<bool> thread_applied(false);
 // 源安装包路径
@@ -30,9 +47,9 @@ std::vector<uint8_t> manifest;
 // 应用信息
 AppInfo info;
 // 安装包内数据包哈希值
-uint64_t apkOBBHash;
+XXH64_hash_t apkOBBHash;
 // 数据包哈希值
-uint64_t OBBHash;
+XXH64_hash_t OBBHash;
 
 // 获取游戏包名
 std::string get_package_name() {
@@ -92,7 +109,7 @@ void get_apk_information() {
   ori_rsb_name = "main." + std::to_string(app_version) + "." + get_package_name() + ".obb";
   rsb_path_str = "/storage/emulated/0/Android/obb/" + get_package_name();
   rsb_self_path_str = rsb_path_str + "/" + ori_rsb_name;
-  LOGI("ori_rsb_name = %s,rsb_path_str = %s,rsb_self_path_str = %s", ori_rsb_name.c_str(),
+  LOGI("ori_rsb_name = %s, rsb_path_str = %s, rsb_self_path_str = %s", ori_rsb_name.c_str(),
        rsb_path_str.c_str(), rsb_self_path_str.c_str());
 }
 
@@ -128,7 +145,6 @@ bool check_magic_number(const char *path, const char *magic) {
 }
 
 // 验证文件是否一致
-
 bool OBBHashEquals() {
   LOGI("Hash Start");
   if (apk_path.empty())
@@ -158,8 +174,6 @@ bool OBBHashEquals() {
   return result;
 }
 
-#undef USE_HASH_CHECK
-
 // Assets版直装转移
 bool AssetsRSBDirectInstall() {
   if (apk_path.empty())
@@ -178,7 +192,7 @@ bool AssetsRSBDirectInstall() {
 
 // 线程监控OBB路径是否存在
 void obb_path_monitor() {
-  while (true) {
+  while (1) {
     if (apk_path.empty())
       get_apk_information();
     if (OBBPathExisted()) {
@@ -186,25 +200,28 @@ void obb_path_monitor() {
       LOGI("RSBDirectInstall Start.");
       AssetsRSBDirectInstall();
       LOGI("RSBDirectInstall End.");
-      if (OBBExisted() || OBBHashEquals()) {
-        // 成功迁移
-        thread_applied = false;
-      }
+      thread_applied = false;
+#if GAME_VERSION < 1031
+      if (exit_when_finished)
+        kill(getpid(), SIGKILL);
+#endif
       return;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
   }
 }
 
 // 让主程序延迟防止数据包迁移期间被读取
 void delay_PvZ2() {
   while (thread_applied) {
-    LOGI("RSB first loaded, sleeping......");
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    LOGI("RSB installing, sleep...");
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
   }
 }
 
 inline void process() {
+  if (!OBBPathExisted())
+    exit_when_finished = true;
   // 必须留，获取包名和版本号信息
   if (apk_path.empty())
     get_apk_information();
@@ -348,22 +365,6 @@ namespace HookResourceManagerFunc {
 
 #define USE_DIRECT_INSTALL_OBB
 // #define USE_RSB_DECRYPT
-
-#ifdef USE_RSB_DECRYPT
-
-// 检测是否ROOT
-bool isRooted() {
-  // 检查常见的 Root 路径和文件
-  const char *paths[] = {"/system/app/Superuser.apk", "/sbin/su", "/system/bin/su",
-                         "/system/xbin/su"};
-  for (auto path : paths) {
-    if (access(path, F_OK) == 0)
-      return true;
-  }
-  return false;
-}
-
-#endif
 
 // 直装包卡主进程以及 ROOT 检测
 typedef void (*ResourceManagerFunc)(__int64 a1, char a2, int a3);

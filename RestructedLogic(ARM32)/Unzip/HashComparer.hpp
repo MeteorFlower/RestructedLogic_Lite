@@ -20,8 +20,8 @@ class HashComparer {
     XXH3_state_t *state = XXH3_createState();
     XXH3_64bits_reset(state);
 
-    // 64KB 缓冲区对 L1/L2 缓存友好
-    std::vector<char> buffer(64 * 1024);
+    // 使用缓冲区分段计算哈希
+    std::vector<char> buffer(256 * 1024);
     while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0) {
       XXH3_64bits_update(state, buffer.data(), file.gcount());
     }
@@ -59,7 +59,7 @@ class HashComparer {
     return 0;
   }
 
-  static uint64_t get_asset_hash(const std::string &apk_path,
+  static XXH64_hash_t get_asset_hash(const std::string &apk_path,
                                  const std::string &asset_internal_path) {
     mz_zip_archive zip{};
 
@@ -94,8 +94,8 @@ class HashComparer {
       return 0;
     }
 
-    // 5. 生成 64 位摘要
-    uint64_t final_hash = XXH3_64bits_digest(state);
+    // 5. 生成 64 位哈希
+    XXH64_hash_t final_hash = XXH3_64bits_digest(state);
 
     // 6. 清理
     XXH3_freeState(state);
@@ -105,17 +105,17 @@ class HashComparer {
   }
 
   // 读取预存的哈希值
-  static uint64_t read_hash_after_header(const char *path) {
+  static XXH64_hash_t read_hash_after_header(const char *path) {
     FILE *fp = fopen(path, "rb");
     if (!fp)
       return 0;
 
-    uint64_t hash_val = 0;
+    XXH64_hash_t hash_val = 0;
 
     // 1. 直接跳到偏移量为 4 的位置
     if (fseek(fp, 4, SEEK_SET) == 0) {
       // 2. 读取 8 字节的 64 位哈希
-      if (fread(&hash_val, sizeof(uint64_t), 1, fp) != 1) {
+      if (fread(&hash_val, sizeof(XXH64_hash_t), 1, fp) != 1) {
         hash_val = 0;
       }
     }
@@ -149,7 +149,6 @@ class HashComparer {
     outFile.write(header, 4);
 
     // 4. 写入 8 字节哈希值 (uint64_t / XXH64_hash_t)
-    // 在 64 位系统下，这能极大降低哈希碰撞的概率
     outFile.write(reinterpret_cast<const char *>(&hashResult), sizeof(XXH64_hash_t));
 
     outFile.close();
