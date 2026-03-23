@@ -10,7 +10,7 @@ RestructedLogic_Lite is a simplified version based on RestructedLogic. It remove
 
 - Expand character cache limitation. (This feature is primarily intended for users who use Chinese-localized OBBs, to reduce the occurrence of missing Chinese characters.)
 
-- RSB decrypt.
+- RSB decrypt. (Use the project <https://github.com/Endlin-Boeingstein/RSBEncrypter> to encrypt the OBB.)
 
 - In-game Max Zoom Perspective. (高视角 in Chinese.)
 
@@ -42,6 +42,12 @@ XMDS's hooking project: <https://github.com/XMDS/GlossHook>.
 Ookdshin's PicoSHA2: [GitHub - okdshin/PicoSHA2: a header-file-only, SHA256 hash generator in C++](https://github.com/okdshin/PicoSHA2).
 
 Kokke's Tiny-AES-C: [GitHub - kokke/tiny-AES-c: Small portable AES128/192/256 in C](https://github.com/kokke/tiny-AES-c).
+
+Rich Geldreich's miniz for portable unzipping: <https://github.com/richgel999/miniz>.
+
+Yutaka Tsutano's axmldec for analysing AXML (Reference) : <https://github.com/ytsutano/axmldec>.
+
+Yann Collet's xxHash: <https://github.com/Cyan4973/xxHash>.
 
 BlazeyLol's updated lib.so hooking project: <https://github.com/BlazeyLol/PVZ2ExampleMod>.
 
