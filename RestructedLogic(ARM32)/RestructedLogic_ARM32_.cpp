@@ -881,19 +881,14 @@ int hkLawnAppScreenWidthHeight(float *a1, int a2) {
     return result;
 
   // 2. 根据偏移直接提取数据
-  // 注意：a1 是 float*，偏移计算需小心转换
-  int *iPtr = (int *)a1;
-
-  // 根据 sub_1482320: 1448字节 = 偏移362, 1452字节 = 偏移363
 #ifdef _DEBUG
-  mOrigScreenWidth = iPtr[362];
+  mOrigScreenWidth = *((_DWORD *)a1 + 325);
 #endif
-  mOrigScreenHeight = iPtr[363];
+  mOrigScreenHeight = *((_DWORD *)a1 + 326);
 
-  // 根据自身
-  mWidth = iPtr[25];
+  mWidth = *((_DWORD *)a1 + 25);
 #ifdef _DEBUG
-  mHeight = iPtr[26];
+  mHeight = *((_DWORD *)a1 + 26);
 #endif
 
   // 3. 输出日志
@@ -1059,7 +1054,7 @@ int hkResourceManagerFunc(int a1, int a2, int a3) {
   DirectInstallOBB::delay_PvZ2();
 #endif
 
-  int backdata = oResourceManagerFunc(a1, a2, a3);
+  int result = oResourceManagerFunc(a1, a2, a3);
 
 #ifdef USE_RSB_DECRYPT
   // 如果检测到ROOT，则进入秒删模式
@@ -1070,7 +1065,7 @@ int hkResourceManagerFunc(int a1, int a2, int a3) {
 #endif
 
   LOGI("Hooking ResourcesManagerFunc End");
-  return backdata;
+  return result;
 }
 
 inline void process() {
