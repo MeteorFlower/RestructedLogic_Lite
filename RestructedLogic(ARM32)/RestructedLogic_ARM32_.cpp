@@ -11,6 +11,7 @@
 using _DWORD = uint32_t;
 using __int64 = int64_t;
 using _BYTE = uint8_t;
+using _QWORD = uint64_t;
 
 #pragma region IsRooted
 
@@ -315,10 +316,10 @@ int hkLogOutputFunc_Struct(void *result) {
     // 如果 (*(unsigned char*)result & 1) != 0
     if ((*((unsigned char *)result) & 1) != 0) {
       // 长字符串逻辑：从偏移 8 处取指针
-      v1 = *(const char **)((uint)result + 8);
+      v1 = *(const char **)((size_t)result + 8);
     } else {
       // 短字符串逻辑：从偏移 1 处取内容
-      v1 = (const char *)((uint)result + 1);
+      v1 = (const char *)((size_t)result + 1);
     }
     // 如果指针不为空且内容不为空字符串
     if (v1 && *v1 != '\0') {
@@ -375,7 +376,7 @@ CDNExpand oCDNLoad = nullptr;
 
 std::atomic<bool> executed(false);
 
-void hkCDNLoad(int *a1, const Sexy::SexyString &rtonName, int rtonTable, int a4) {
+int hkCDNLoad(int *a1, const Sexy::SexyString &rtonName, int rtonTable, int a4) {
   // 至于这个偏移怎么查.........很简单，HEX搜products.rton
   // 然后根据products.rton的"p"的偏移地址，用ida pro跳转到该地址
   // 你会发现一堆的rton（绿色）右侧都用同一个DATA XREF地址跳转（引用偏移地址）
@@ -401,7 +402,7 @@ void hkCDNLoad(int *a1, const Sexy::SexyString &rtonName, int rtonTable, int a4)
     }
   }
   LOGI("%s:%d is loaded", rtonName.c_str(), rtonTable);
-  oCDNLoad(a1, rtonName, rtonTable, a4);
+  return oCDNLoad(a1, rtonName, rtonTable, a4);
 }
 
 inline void process() {
@@ -566,8 +567,8 @@ int hkRSBPathRecorder(uint *a1) {
   } else {
     path_ptr = (char *)a1[1];  // 非动态分配，路径在 a1[1]
   }
-  if (!path_ptr || (uint)path_ptr < 0x1000) {
-    LOGI("RSBPathRecorder: Invalid path pointer 0x%x, a1[0]=0x%x", (uint)path_ptr, a1[0]);
+  if (!path_ptr || (size_t)path_ptr < 0x1000) {
+    LOGI("RSBPathRecorder: Invalid path pointer 0x%x, a1[0]=0x%x", (size_t)path_ptr, a1[0]);
     return result;
   }
   std::string original_path;
@@ -602,7 +603,6 @@ int hkRSBPathRecorder(uint *a1) {
   // 获取数据包名
   std::string rsb_name = path_components[path_components.size() - 1];
 
-  // 验证预期路径，可改，改成你的改版路径即可，不改也没影响！！！！！！！！！！！！
   std::string expected_path = "/storage/emulated/0/Android/obb/" + pack_name + "/" + rsb_name;
   if (original_path != expected_path) {
     LOGI("RSBPathRecorder: Path mismatch, expected %s", expected_path.c_str());
@@ -611,9 +611,7 @@ int hkRSBPathRecorder(uint *a1) {
 
   LOGI("RSB_TRACE: Starting Hybrid Mmap-Stream Process...");
 
-  // 一定要改！！！！！把你的地址改成/data/data/com.ea.game.pvz2_改版名/files！！！！！
-  std::string cache_dir = "/data/data/" + pack_name +
-                          "/files";  /// storage/emulated/0/Android/data/com.ea.game.pvz2_row/cache
+  std::string cache_dir = "/data/data/" + pack_name + "/files";
   makePath(cache_dir);
   // 这个地方可以随意写，这样别人就认不出来了
   std::string temp_path = cache_dir + "/.cache_file";
@@ -763,11 +761,11 @@ int hkRSBPathRecorder(uint *a1) {
     unsigned int v8 = (v10 + 16) & 0xFFFFFFF0;  // 分配大小
     a1[0] = v8 | 1;                             // a1[0] = 65 (0x41)
     a1[1] = new_path_len;                       // a1[1] = 47 (0x2F)
-    a1[2] = (uint)new_path;                     // 新路径指针
+    a1[2] = (size_t)new_path;                     // 新路径指针
   } else {
     // 非动态分配
     a1[0] = 2 * new_path_len;  // a1[0] = 2 * 路径长度
-    a1[1] = (uint)new_path;    // a1[1] = 新路径指针
+    a1[1] = (size_t)new_path;    // a1[1] = 新路径指针
   }
   LOGI("RSBPathRecorder: Replaced path with %s", temp_path.c_str());
 
@@ -791,7 +789,7 @@ PrimeGlyphCacheLimitation oPrimeGlyphCacheLimitation = nullptr;
 uint *hkPrimeGlyphCacheLimitation(uint *a1, int a2, int a3, int a4) {
   uint *result = oPrimeGlyphCacheLimitation(a1, a2, a3, a4);
   a1[22] = 2048;
-  LOGI("Hooked sub_177ECF4: Modified a1[22] to %d", a1[22]);
+  LOGI("Hooked PrimeGlyphCacheLimitation: Modified a1[22] to %d", a1[22]);
   return result;
 }
 
@@ -980,8 +978,7 @@ int hkWorldMapScroll(int a1, int a2, int a3) {
   *(int32_t *)(a1 + 316) = -1000000000;
   *(int32_t *)(a1 + 320) = 2000000000;
   *(int32_t *)(a1 + 324) = 2000000000;
-  int result = oWorldMapScroll(a1, a2, a3);
-  return result;
+  return oWorldMapScroll(a1, a2, a3);
 }
 // 居中函数：
 typedef int (*KeepCenter)(int, uint *, bool);
@@ -991,8 +988,7 @@ int hkKeepCenter(int a1, uint *a2, bool a3) {
   *(int32_t *)(a1 + 316) = -1000000000;
   *(int32_t *)(a1 + 320) = 2000000000;
   *(int32_t *)(a1 + 324) = 2000000000;
-  int result = oKeepCenter(a1, a2, true);
-  return result;
+  return oKeepCenter(a1, a2, true);
 }
 // 惯性函数：
 typedef int (*ScrollInertance)(int);
@@ -1002,8 +998,7 @@ int hkScrollInertance(int a1) {
   *(int32_t *)(a1 + 316) = -1000000000;
   *(int32_t *)(a1 + 320) = 2000000000;
   *(int32_t *)(a1 + 324) = 2000000000;
-  int result = oScrollInertance(a1);
-  return result;
+  return oScrollInertance(a1);
 }
 
 #else

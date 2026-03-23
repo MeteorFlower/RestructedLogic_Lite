@@ -14,18 +14,19 @@ RestructedLogic_Lite is a simplified version based on RestructedLogic. It remove
 
 - In-game Max Zoom Perspective. (高视角 in Chinese.)
 
-- Enable World Map vertical scrolling. (Both versions after and before 10.0 can be used.)
+- Enable World Map vertical scrolling. (Compatible with versions both before and after 10.0.)
 
-- Directly install OBB when launch the game for the first time, instead of manually placing OBB.
+- OBB direct install, with automatic updates to the OBB in storage when the built-in OBB version in the APK is updated.
 
-- Customize CDN read list (debug mode only).
+- Customize CDN read list.
 
-- Game log output (debug mode only).
+- Game log output.
 
-  Use the following adb command on your computer to view the log output:
+  Use the following adb commands (select according to your architecture) on your computer to view the log output:
 
   ```cmd
   adb logcat -s RestructedLogic_ARM32_:I
+  adb logcat -s RestructedLogic_ARM64_:I
   ```
 
 ## Credits
@@ -58,38 +59,32 @@ Download and install Visual Studio 2022: <https://visualstudio.microsoft.com>.
 
 Modify the Visual Studio 2022's Workloads and install `Mobile development with C++` module. And then, you can clone the repo and open the repo's `.sln` file by Visual Studio 2022.
 
-If you want to generate ARM32 so. Select the `RestructedLogic(ARM32)` and click the triangle button that the `Release` `ARM` nearby.  If you want to generate ARM64 so. Select the `RestructedLogic(ARM64)` and click the triangle button that the `Release` `ARM64` nearby.
+If you want to generate ARM32 `.so`. Select the `RestructedLogic(ARM32)` and click the triangle button that the `Release` `ARM` nearby.  If you want to generate ARM64 `.so`. Select the `RestructedLogic(ARM64)` and click the triangle button that the `Release` `ARM64` nearby.
 
-Then in the folder, you would found ARM and ARM64 folder. These so file may inside that name called `libRestructedLogic_ARM32_.so` in `ARM/Release` and `libRestructedLogic_ARM64_.so` in `ARM64/Release`.
+Then in the folder, you will find `ARM` and/or `ARM64` folders. The `.so` files will be located in `ARM/Release` (named `libRestructedLogic_ARM32_.so`) and/or `ARM64/Release` (named `libRestructedLogic_ARM64_.so`).
 
-Download APKToolGUI: <https://drive.google.com/file/u/0/d/1Zko59XeiX7DZENWaLDsPjvHPfk9dwHgi/view?usp=drive_link&pli=1>. Use APKToolGUI to decompile the apk that you want to hook.
+Download APKToolGUI: <https://drive.google.com/file/u/0/d/1Zko59XeiX7DZENWaLDsPjvHPfk9dwHgi/view?usp=drive_link&pli=1>. Use APKToolGUI to decompile the APK that you want to hook.
 
-Copy the .so file to the decompiled folder's `lib\armeabi-v7a` path when you want to use ARM32 or `lib\arm64-v8a` path when you want to use ARM64. Change the .so file's name to `libRestructedLogic.so`.
+Copy the `.so` file to the decompiled folder's `lib\armeabi-v7a` path when you want to use ARM32 or `lib\arm64-v8a` path when you want to use ARM64. Change the `.so` file's name to `libRestructedLogic.so`.
 
-Delete the ARM lib version folder that you needn't use it.
+Delete the `armeabi-v7a` or `arm64-v8a` folder in `lib` for the architecture you do not need.
 Then modify `PvZ2GameActivity.smali` which is in the decompiled folder. Open it, and find this:
 
 ```
-    .line 57  
-    invoke-static {v0}, Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V   
-```
-
-If you can not find this you would find:
-
-```
-    invoke-static {v0}, Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V  
+    invoke-static {v0}, Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V
+    
     const-string v0, "PVZ2"
 ```
 
-The key statements behind this like:
+The key statement behind looks like this:
 
 ```
     invoke-static {v0}, Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V
 ```
 
-this key statements without const-string v0, "XXX"
+This key statement should not be followed by `const-string v0, "XXX"`.
 
-Down there your paste this:
+Below, paste this:
 
 ```
     const-string v0, "RestructedLogic"
@@ -108,8 +103,6 @@ It should look like this:
 ```
 
 Save and exit.  
-
-If you think RestructedLogic is not cooooooool. You can modify `PvZ2GameActivity.smali`. Change `RestructedLogic` to what you want to change without `lib` header. Save and exit. And then, Change `libRestructedLogic.so` to `lib`+`ChangedName`+`.so`.  
 
 Compile the decompiled folder. You will get a hooked apk. Install it in your device, enjoy it.
 

@@ -5,7 +5,7 @@
 #endif
 
 constexpr size_t UNKNOWN = 0;
-#define GAME_VERSION 873
+#define GAME_VERSION 1031
 // 填入版本号，为去掉小数点的版本号
 // UNKNOWN 表示暂时未知
 
@@ -100,21 +100,21 @@ constexpr int firstFreePlantID = 191;
 #if GAME_VERSION == 1031
 
 constexpr size_t PlantNameMapperAddr = UNKNOWN;
-constexpr size_t PrimeGlyphCacheAddr = UNKNOWN;
-constexpr size_t RSBPathRecorderAddr = UNKNOWN;
-constexpr size_t ResourceManagerFuncAddr = UNKNOWN;
+constexpr size_t PrimeGlyphCacheAddr = 0x18A5400;
+constexpr size_t RSBPathRecorderAddr = 0x177F714;
+constexpr size_t ResourceManagerFuncAddr = 0x9C0F70;
 constexpr size_t CDNLoadAddr = UNKNOWN;
 constexpr size_t LogOutputFuncAddr_Simple = UNKNOWN;
-constexpr size_t LogOutputFuncAddr = UNKNOWN;
+constexpr size_t LogOutputFuncAddr = 0x15EDE68;
 constexpr size_t LogOutputFuncAddr_Struct = UNKNOWN;
 constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
-constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
-constexpr size_t BoardZoomAddr = UNKNOWN;
-constexpr size_t BoardZoom2Addr = UNKNOWN;
+constexpr size_t LawnAppScreenWidthHeightAddr = 0x9B7800;
+constexpr size_t BoardZoomAddr = 0xB380D8;
+constexpr size_t BoardZoom2Addr = 0xB3832C;
 constexpr size_t WorldMapDoMovementAddr = UNKNOWN;
-constexpr size_t WorldMapScrollAddr = UNKNOWN;
-constexpr size_t KeepCenterAddr = UNKNOWN;
-constexpr size_t ScrollInertanceAddr = UNKNOWN;
+constexpr size_t WorldMapScrollAddr = 0x820CD4;
+constexpr size_t KeepCenterAddr = 0x826944;
+constexpr size_t ScrollInertanceAddr = 0x830194;
 constexpr int firstFreePlantID = UNKNOWN;  // 10.3 不需要
 
 #endif
