@@ -238,15 +238,32 @@ LogOutputFunc oLogOutputFunc = nullptr;
 std::mutex g_logMutex;
 
 int hkLogOutputFunc(char *format, ...) {
-  va_list va;
-  va_start(va, format);
-
+  if (!oLogOutputFunc) {
+    LOGI("LogOutputFunc: Original function pointer is null");
+    return -1;
+  }
   std::lock_guard<std::mutex> lock(g_logMutex);
-  LOGI("LogOutputFunc: ");
-  LOGI(format, va);
 
-  int result = oLogOutputFunc(format, va);
+  va_list va, va_cpy;
+  va_start(va, format);
+  va_copy(va_cpy, va);
+
+  // 计算所需长度
+  va_start(va, format);
+  char *buffer, temp[1];
+  int len = vsnprintf(temp, 0, format, va);
   va_end(va);
+
+  va_start(va, format);
+  buffer = new char[len + 1];
+  len = vsnprintf(buffer, len + 1, format, va);
+  buffer[len] = '\0';
+  LOGI("LogOutputFunc: %s", buffer);
+
+  int result = oLogOutputFunc(format, va_cpy);
+  va_end(va_cpy);
+  va_end(va);
+  delete[] buffer;
   return result;
 }
 
@@ -391,18 +408,40 @@ void cleanupTempFiles() {
 }
 
 // Hook 函数
-typedef __int64 (*RSBPathRecorder)(_QWORD *a1);
+typedef void *(*RSBPathRecorder)(_QWORD *a1);
 RSBPathRecorder oRSBPathRecorder = nullptr;
 
-__int64 hkRSBPathRecorder(_QWORD *a1) {
+// 调用原函数的外壳
+__attribute__((naked)) void *oRSBPathRecorderShell(_QWORD *a1) {
+  __asm__ volatile(
+      // 保存 x29, x30 并分配 16 字节栈空间（此时 sp 已减 16）
+      "stp x29, x30, [sp, #-16]!\n"
+
+      // 参数传递：将 x0（参数）移到 x8
+      "mov x8, x0\n"
+
+      // 加载原函数地址并调用
+      "ldr x16, %0\n"
+      "blr x16\n"
+
+      // 恢复 x29, x30 并释放最后 16 字节
+      "ldp x29, x30, [sp], #16\n"
+
+      "ret\n"
+      :
+      : "m"(oRSBPathRecorder)
+      : "x0", "x8", "x16", "x29", "x30", "memory");
+}
+
+void *hkRSBPathRecorder(_QWORD *a1) {
   LOGI("Hooking RSBPathRecorder");
   if (!a1) {
     LOGI("RSBPathRecorder: a1 is null");
-    return oRSBPathRecorder(a1);
+    return oRSBPathRecorderShell(a1);
   }
 
   // 调用原始函数
-  __int64 result = oRSBPathRecorder(a1);
+  void *result = oRSBPathRecorderShell(a1);
   LOGI("RSBPathRecorder: Original function returned %lld, a1[0]=0x%x, a1[1]=0x%x, a1[2]=0x%x",
        result, a1[0], a1[1], a1[2]);
 
@@ -607,22 +646,45 @@ __int64 hkRSBPathRecorder(_QWORD *a1) {
     unsigned int v8 = (v10 + 16) & 0xFFFFFFF0;  // 分配大小
     a1[0] = v8 | 1;                             // a1[0] = 65 (0x41)
     a1[1] = new_path_len;                       // a1[1] = 47 (0x2F)
-    a1[2] = (size_t)new_path;                     // 新路径指针
+    a1[2] = (size_t)new_path;                   // 新路径指针
   } else {
     // 非动态分配
     a1[0] = 2 * new_path_len;  // a1[0] = 2 * 路径长度
-    a1[1] = (size_t)new_path;    // a1[1] = 新路径指针
+    a1[1] = (size_t)new_path;  // a1[1] = 新路径指针
   }
   LOGI("RSBPathRecorder: Replaced path with %s", temp_path.c_str());
 
   return result;
 }
 
+RSBPathRecorder hkRSBPathRecorder_ptr = &hkRSBPathRecorder;
+// 拦截函数外壳
+__attribute__((naked)) void *hkRSBPathRecorderShell(void) {
+  __asm__ volatile(
+      // 保存 x29, x30 并分配 16 字节栈空间（此时 sp 已减 16）
+      "stp x29, x30, [sp, #-16]!\n"
+
+      // 参数传递：将原函数参数从 x8 移到 x0
+      "mov x0, x8\n"
+
+      // 加载 C 函数地址并调用
+      "ldr x16, %0\n"
+      "blr x16\n"
+
+      // 恢复 x29, x30 并释放最后 16 字节
+      "ldp x29, x30, [sp], #16\n"
+
+      "ret\n"
+      :
+      : "m"(hkRSBPathRecorder_ptr)
+      : "x0", "x8", "x16", "x29", "x30", "memory");
+}
+
 inline void process() {
-  if constexpr (RSBPathRecorderAddr != UNKNOWN && ResourceManagerFuncAddr != UNKNOWN) {
+  if constexpr (RSBPathRecorderAddr != UNKNOWN) {
     // Hook RSB 读取函数
-    PVZ2HookFunction(RSBPathRecorderAddr, (void *)hkRSBPathRecorder, (void **)&oRSBPathRecorder,
-                     "ResourceManager::RSBPathRecorder");
+    PVZ2HookFunction(RSBPathRecorderAddr, (void *)hkRSBPathRecorderShell,
+                     (void **)&oRSBPathRecorder, "ResourceManager::RSBPathRecorder");
   }
 }
 }  // namespace RSBDecrypt
@@ -788,15 +850,15 @@ void hkBoardZoom2(__int64 a1) {
 }
 
 inline void process() {
-  // 得到缩放前后尺寸
-  if constexpr (LawnAppScreenWidthHeightAddr != UNKNOWN)
+  if constexpr (LawnAppScreenWidthHeightAddr != UNKNOWN && BoardZoomAddr != UNKNOWN &&
+                BoardZoom2Addr != UNKNOWN) {
+    // 得到缩放前后尺寸
     PVZ2HookFunction(LawnAppScreenWidthHeightAddr, (void *)hkLawnAppScreenWidthHeight,
                      (void **)&oLawnAppScreenWidthHeight, "LawnApp::SetScreenWidthHeight");
-  // 控制屏幕缩放
-  if constexpr (BoardZoomAddr != UNKNOWN)
+    // 控制屏幕缩放
     PVZ2HookFunction(BoardZoomAddr, (void *)hkBoardZoom, (void **)&oBoardZoom, "BoardZoom");
-  if constexpr (BoardZoom2Addr != UNKNOWN)
     PVZ2HookFunction(BoardZoom2Addr, (void *)hkBoardZoom2, (void **)&oBoardZoom2, "BoardZoom2");
+  }
 }
 }  // namespace MaxZoom
 

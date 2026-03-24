@@ -277,95 +277,40 @@ LogOutputFunc oLogOutputFunc = nullptr;
 std::mutex g_logMutex;
 
 int hkLogOutputFunc(char *format, ...) {
-  va_list va;
+  if (!oLogOutputFunc) {
+    LOGI("LogOutputFunc: Original function pointer is null");
+    return -1;
+  }
+  std::lock_guard<std::mutex> lock(g_logMutex);
+
+  va_list va, va_cpy;
   va_start(va, format);
+  va_copy(va_cpy, va);
 
-  std::lock_guard<std::mutex> lock(g_logMutex);
-  LOGI("LogOutputFunc: ");
-  LOGI(format, va);
-
-  int result = oLogOutputFunc(format, va);
+  // 计算所需长度
+  va_start(va, format);
+  char *buffer, temp[1];
+  int len = vsnprintf(temp, 0, format, va);
   va_end(va);
-  return result;
-}
 
-typedef int (*LogOutputFunc_Simple)(const char *);
-LogOutputFunc_Simple oLogOutputFunc_Simple = nullptr;
-std::mutex g_logMutex_Simple;
+  va_start(va, format);
+  buffer = new char[len + 1];
+  len = vsnprintf(buffer, len + 1, format, va);
+  buffer[len] = '\0';
+  LOGI("LogOutputFunc: %s", buffer);
 
-int hkLogOutputFunc_Simple(const char *text) {
-  // 预检逻辑（模仿 IDA 中的 if(!v2)）
-  if (text && *text != '\0') {
-    std::lock_guard<std::mutex> lock(g_logMutex_Simple);
-    // 直接打印传入的字符串，无需 vsnprintf，因为这不是可变参数函数
-    LOGI("LogOutputFunc_Simple: %s", text);
-  }
-  // 调用原函数
-  return oLogOutputFunc_Simple(text);
-}
-
-// 参数是 int (寄存器 r0)，在 Hook 中我们定义为 void* 或 long
-typedef int (*LogOutputFunc_Struct)(void *);
-LogOutputFunc_Struct oLogOutputFunc_Struct = nullptr;
-std::mutex g_logMutex_Struct;
-
-int hkLogOutputFunc_Struct(void *result) {
-  if (result) {
-    const char *v1 = NULL;
-    // 模仿 IDA 逻辑：检查标志位
-    // 如果 (*(unsigned char*)result & 1) != 0
-    if ((*((unsigned char *)result) & 1) != 0) {
-      // 长字符串逻辑：从偏移 8 处取指针
-      v1 = *(const char **)((size_t)result + 8);
-    } else {
-      // 短字符串逻辑：从偏移 1 处取内容
-      v1 = (const char *)((size_t)result + 1);
-    }
-    // 如果指针不为空且内容不为空字符串
-    if (v1 && *v1 != '\0') {
-      std::lock_guard<std::mutex> lock(g_logMutex_Struct);
-      LOGI("LogOutputFunc_Struct: %s", v1);
-    }
-  }
-  // 调用原函数并返回其结果
-  return oLogOutputFunc_Struct(result);
-}
-
-typedef int (*LogOutputFunc_v2)(int a1, ...);
-LogOutputFunc_v2 oLogOutputFunc_v2 = nullptr;
-std::mutex g_logMutex_v2;
-
-int hkLogOutputFunc_v2(int a1, ...) {
-  va_list va;
-  va_start(va, a1);
-
-  const char *format = (const char *)a1;
-  std::lock_guard<std::mutex> lock(g_logMutex);
-  LOGI("LogOutputFunc_v2: ");
-  LOGI(format, va);
-
-  int result = oLogOutputFunc_v2(a1, va);
+  int result = oLogOutputFunc(format, va_cpy);
+  va_end(va_cpy);
   va_end(va);
+  delete[] buffer;
   return result;
 }
 
 void process() {
-  // 输出简要日志
-  if constexpr (LogOutputFuncAddr_Simple != UNKNOWN)
-    PVZ2HookFunction(LogOutputFuncAddr_Simple, (void *)hkLogOutputFunc_Simple,
-                     (void **)&oLogOutputFunc_Simple, "LogOutputFunc_Simple");
   // 输出主日志
   if constexpr (LogOutputFuncAddr != UNKNOWN)
     PVZ2HookFunction(LogOutputFuncAddr, (void *)hkLogOutputFunc, (void **)&oLogOutputFunc,
                      "LogOutputFunc");
-  // 输出结构日志
-  if constexpr (LogOutputFuncAddr_Struct != UNKNOWN)
-    PVZ2HookFunction(LogOutputFuncAddr_Struct, (void *)hkLogOutputFunc_Struct,
-                     (void **)&oLogOutputFunc_Struct, "LogOutputFunc_Struct");
-  // 输出v2日志
-  if constexpr (LogOutputFuncAddr_v2 != UNKNOWN)
-    PVZ2HookFunction(LogOutputFuncAddr_v2, (void *)hkLogOutputFunc_v2, (void **)&oLogOutputFunc_v2,
-                     "LogOutputFunc_v2");
 }
 }  // namespace LogOutput
 
@@ -761,11 +706,11 @@ int hkRSBPathRecorder(uint *a1) {
     unsigned int v8 = (v10 + 16) & 0xFFFFFFF0;  // 分配大小
     a1[0] = v8 | 1;                             // a1[0] = 65 (0x41)
     a1[1] = new_path_len;                       // a1[1] = 47 (0x2F)
-    a1[2] = (size_t)new_path;                     // 新路径指针
+    a1[2] = (size_t)new_path;                   // 新路径指针
   } else {
     // 非动态分配
     a1[0] = 2 * new_path_len;  // a1[0] = 2 * 路径长度
-    a1[1] = (size_t)new_path;    // a1[1] = 新路径指针
+    a1[1] = (size_t)new_path;  // a1[1] = 新路径指针
   }
   LOGI("RSBPathRecorder: Replaced path with %s", temp_path.c_str());
 
@@ -946,15 +891,15 @@ int hkBoardZoom2(int a1) {
 }
 
 inline void process() {
-  // 得到缩放前后尺寸
-  if constexpr (LawnAppScreenWidthHeightAddr != UNKNOWN)
+  if constexpr (LawnAppScreenWidthHeightAddr != UNKNOWN && BoardZoomAddr != UNKNOWN &&
+                BoardZoom2Addr != UNKNOWN) {
+    // 得到缩放前后尺寸
     PVZ2HookFunction(LawnAppScreenWidthHeightAddr, (void *)hkLawnAppScreenWidthHeight,
                      (void **)&oLawnAppScreenWidthHeight, "LawnApp::SetScreenWidthHeight");
-  // 控制屏幕缩放
-  if constexpr (BoardZoomAddr != UNKNOWN)
+    // 控制屏幕缩放
     PVZ2HookFunction(BoardZoomAddr, (void *)hkBoardZoom, (void **)&oBoardZoom, "BoardZoom");
-  if constexpr (BoardZoom2Addr != UNKNOWN)
     PVZ2HookFunction(BoardZoom2Addr, (void *)hkBoardZoom2, (void **)&oBoardZoom2, "BoardZoom2");
+  }
 }
 }  // namespace MaxZoom
 
