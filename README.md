@@ -12,7 +12,7 @@ RestructedLogic_Lite is a simplified version based on RestructedLogic. It remove
 
 - RSB decrypt. (Use the project <https://github.com/Endlin-Boeingstein/RSBEncrypter> to encrypt the OBB.)
 
-- In-game Max Zoom Perspective. (高视角 in Chinese.)
+- In-game Max Zoom Perspective. (高视角 in Chinese. It follows the original Data Sharing switch in Settings: Data Sharing on gives the original view, off gives Max Zoom.)
 
 - Enable World Map vertical scrolling. (Compatible with versions both before and after 10.0.)
 
