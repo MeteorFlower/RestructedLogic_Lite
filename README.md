@@ -2,7 +2,7 @@
 
 Restructed Logic is a project which can help you create PvZ2's hooking by Visual Studio's C++ Mobile development module without any other operations to modify the path and the settings.
 
-RestructedLogic_Lite is a simplified version based on RestructedLogic. It removes rarely used and untested features, while eliminating bloated and redundant parts of the code. The codebase has been reorganized in a more C++-style (rather than C-style) manner.
+RestructedLogic_Lite is a reorganized and evolved version based on RestructedLogic. It added some features, removes rarely used and untested features, while eliminating bloated and redundant parts of the code. The codebase has been reorganized in a more C++-style manner (but the logic inside the functions is still mostly IDA's C-style).
 
 ## Features
 
@@ -18,15 +18,15 @@ RestructedLogic_Lite is a simplified version based on RestructedLogic. It remove
 
 - OBB direct install, with automatic updates to the OBB in storage when the built-in OBB version in the APK is updated.
 
-- Enable the RESTART button in the pause menu of the Dangerroom.
+- Enable the `RESTART` and `SAVE AND EXIT` buttons in the pause menu of the Dangerroom. 
 
-- Disable the almanac tutorial. (Stops the forced click in `Find More` button, the tutorial check and the narrative dialogue.)
+- Disable the almanac tutorial. (Stops the forced click on the `Find More` button, the tutorial check and the narrative dialogue.)
 
 - Snapdragon warming. (Only for versions before 9.x, the higher versions have it built in.)
 
 - Ash death fix. (A zombie (aka a Gargantuar) killed by an ash effect still triggers its attack frames; pause its animation clock when that happens.)
 
-- Fix Spring Bean is vulnerable during its Plant Food.
+- Fix Spring Bean being vulnerable during its Plant Food.
 
 - Skin costumes on versions before 9.x. (The plant uses the skin costume's PopAnim, and the skin animation's resource group should be in the plant's resource groups. Write `skin:<POPANIM_NAME>` in the costume's LayerName field to mark it as a skin costume.)
 
@@ -69,7 +69,7 @@ RenoJson's PvZ2-Libbing-Stuff-For-9.6- project: <https://github.com/RenoJson/PvZ
 
 RenoJson's Deprecated-Lib hooking project: <https://github.com/RenoJson/Deprecated-Lib>.
 
-Endlin-Boeingstein's multi-version hooking project (The full version of this project):  <https://github.com/Endlin-Boeingstein/RestructedLogic>
+Endlin-Boeingstein's multi-version hooking project (The base version of this project):  <https://github.com/Endlin-Boeingstein/RestructedLogic>
 
 ## Usage
 
