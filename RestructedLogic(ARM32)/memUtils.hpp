@@ -18,11 +18,14 @@ void *copyVFTable(size_t vftableAddr, int numVFuncs);
 
 void patchVFTable(void *vftable, void *funcAddr, int index);
 
+// 直接 patch 4 字节指令（mprotect 解锁 + 写入 + 清缓存）；offset 为模块内偏移
+void patchInsn32(size_t offset, uint32_t value);
+
 void copyVFTable(void *dest, size_t vftableAddr, int numVFuncsToCopy);
 
-void *createChildVFTable(int vFuncsCount, int parentVftable, int nuMVFuncsToCopy);
+void *createChildVFTable(int vFuncsCount, size_t parentVftable, int nuMVFuncsToCopy);
 
-void setVFTable(void *obj, size_t newVftablePtr);
+void setVFTable(void *obj, void *newVftablePtr);
 
 void *GetVirtualFunc(void *obj, int index);
 

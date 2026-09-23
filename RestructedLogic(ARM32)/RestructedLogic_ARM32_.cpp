@@ -1,9 +1,10 @@
-﻿#include "memUtils.hpp"
+#include "memUtils.hpp"
 #include "Unzip/ApkUnzipper.hpp"
 #include "Unzip/HashComparer.hpp"
 #include "AXML/axml_parser.hpp"
 #include "Decrypt/picosha2.hpp"
 #include "Decrypt/aes.hpp"
+#include "tinyxml2/tinyxml2.h"
 #include "SexyTypes.hpp"
 #include "RestructedLogic_ARM32_.hpp"
 #include "VersionSwitcher.hpp"
@@ -11,9 +12,6 @@
 using _DWORD = uint32_t;
 using __int64 = int64_t;
 using _BYTE = uint8_t;
-using _QWORD = uint64_t;
-
-#pragma region IsRooted
 
 // 检测是否ROOT
 bool isRooted() {
@@ -26,8 +24,6 @@ bool isRooted() {
   }
   return false;
 }
-
-#pragma endregion
 
 namespace DirectInstallOBB {
 bool exit_when_finished = false;
@@ -90,7 +86,7 @@ std::vector<uint8_t> read_manifest(const std::string &apk) {
 
 AppInfo get_app_info() {
   apk_path = find_apk_path();
-  LOGI("APK LOACTION:%s", apk_path.c_str());
+  LOGI("APK location: %s", apk_path.c_str());
   manifest = read_manifest(apk_path);
   return parse_manifest(manifest.data(), manifest.size());
 }
@@ -152,7 +148,7 @@ bool OBBHashEquals() {
     get_apk_information();
   size_t apkObbSize = ApkUnzipper::get_apk_asset_size(apk_path, "assets/" + ori_rsb_name);
   if (apkObbSize == 0) {
-    LOGI("哈希校验：非直装包");
+    LOGI("Not a direct-install package, skipping hash check.");
     return true;
   }
 
@@ -163,12 +159,11 @@ bool OBBHashEquals() {
   } else {
     // 如果大小不一，直接就是不一样
     if (apkObbSize != std::filesystem::file_size(std::filesystem::path(rsb_self_path_str))) {
-      LOGI("文件大小不一，必然不同");
+      LOGI("Size mismatch, hashes must differ.");
       return false;
     }
     OBBHash = HashComparer::compute_file_hash(std::filesystem::path(rsb_self_path_str));
   }
-
   apkOBBHash = HashComparer::get_asset_hash(apk_path, "assets/" + ori_rsb_name);
   bool result = HashComparer::are_hashes_identical(apkOBBHash, OBBHash);
   LOGI("Hash End");
@@ -186,7 +181,7 @@ bool AssetsRSBDirectInstall() {
         rsb_self_path_str, std::filesystem::perms::owner_all | std::filesystem::perms::group_read);
     return 1;
   } else {
-    LOGI("不是直装包");
+    LOGI("Not a direct-install package.");
     return 0;
   }
 }
@@ -232,9 +227,209 @@ inline void process() {
 }
 }  // namespace DirectInstallOBB
 
+namespace MaxZoom {
+
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+constexpr bool ENABLE = LawnAppScreenWidthHeightAddr != UNKNOWN && BoardZoomAddr != UNKNOWN &&
+                        BoardZoom2Addr != UNKNOWN;
+
+constexpr int TEXTURE_WIDTH = 2048, TEXTURE_LEFT_WIDTH = 556, TEXTURE_RIGHT_WIDTH = 1345;
+constexpr int stageRightLine = TEXTURE_WIDTH + TEXTURE_RIGHT_WIDTH;
+
+// 选卡界面与正式游戏视野右边缘（相对于棋盘左侧边缘的距离）
+int gameStartRightLine, preGameRightLine;
+
+// 设备分辨率
+#ifdef _DEBUG
+int mOrigScreenWidth;
+#endif
+int mOrigScreenHeight;
+
+// 游戏分辨率
+int mWidth;
+#ifdef _DEBUG
+int mHeight;
+#endif
+
+// LawnAppScreenWidthHeight 的原函数会随版本变化。目前只知道低版本和高版本的写法。
+// 其他版本欢迎补充。
+#if GAME_VERSION == 873
+
+typedef int (*LawnAppScreenWidthHeight)(int a1, int a2);
+static LawnAppScreenWidthHeight oLawnAppScreenWidthHeight = nullptr;
+
+int hkLawnAppScreenWidthHeight(int a1, int a2) {
+  // 1. 先执行原函数，让内部逻辑完成内存写入
+  int result = oLawnAppScreenWidthHeight(a1, a2);
+
+  if (a1 == NULL)
+    return result;
+
+  // 2. 根据偏移直接提取数据
+#ifdef _DEBUG
+  mOrigScreenWidth = *(_DWORD *)(a1 + 1512);
+#endif
+  mOrigScreenHeight = *(_DWORD *)(a1 + 1516);
+
+  // 根据自身
+  mWidth = *(_DWORD *)(a1 + 136);
+#ifdef _DEBUG
+  mHeight = *(_DWORD *)(a1 + 140);
+#endif
+
+  // 3. 输出日志
+  LOGI(R"(
+--- LawnApp::SetWidthHeight Hook ---
+mOrigWidth: %d, mOrigHeight: %d
+mWidth: %d, mHeight: %d
+result: %d)",
+       mOrigScreenWidth, mOrigScreenHeight, mWidth, mHeight, result);
+
+  // 若游戏分辨率宽度大于棋盘和左侧的总宽度（足以让左侧全部显示），则使偏移与左侧宽度相同
+  // 否则使偏移等于游戏分辨率宽度减去棋盘宽度（即让右侧边缘与屏幕右侧对齐）
+  gameStartRightLine = (mWidth >= TEXTURE_WIDTH + TEXTURE_LEFT_WIDTH)
+                           ? (mWidth - TEXTURE_LEFT_WIDTH)
+                           : TEXTURE_WIDTH;
+  gameStartRightLine = std::min(gameStartRightLine, stageRightLine);
+  preGameRightLine = (gameStartRightLine + stageRightLine) / 2;
+  preGameRightLine = std::min(preGameRightLine, stageRightLine);
+
+  return result;
+}
+
+#elif GAME_VERSION == 1031
+
+typedef int (*LawnAppScreenWidthHeight)(float *a1, int a2);
+static LawnAppScreenWidthHeight oLawnAppScreenWidthHeight = nullptr;
+
+int hkLawnAppScreenWidthHeight(float *a1, int a2) {
+  // 1. 先执行原函数，让内部逻辑完成内存写入
+  int result = oLawnAppScreenWidthHeight(a1, a2);
+
+  if (a1 == nullptr)
+    return result;
+
+  // 2. 根据偏移直接提取数据
+  // 注意：a1 是 float*，偏移计算需小心转换
+  int *iPtr = (int *)a1;
+
+  // 1448字节 = 偏移362, 1452字节 = 偏移363
+#ifdef _DEBUG
+  mOrigScreenWidth = iPtr[362];
+#endif
+  mOrigScreenHeight = iPtr[363];
+
+  // 根据自身
+  mWidth = iPtr[25];
+#ifdef _DEBUG
+  mHeight = iPtr[26];
+#endif
+
+  // 3. 输出日志
+  LOGI(R"(
+--- LawnApp::SetWidthHeight Hook ---
+mOrigWidth: %d, mOrigHeight: %d
+mWidth: %d, mHeight: %d
+result: %d)",
+       mOrigScreenWidth, mOrigScreenHeight, mWidth, mHeight, result);
+
+  // 若游戏分辨率宽度大于棋盘和左侧的总宽度（足以让左侧全部显示），则使偏移与左侧宽度相同
+  // 否则使偏移等于游戏分辨率宽度减去棋盘宽度（即让右侧边缘与屏幕右侧对齐）
+  gameStartRightLine = (mWidth >= TEXTURE_WIDTH + TEXTURE_LEFT_WIDTH)
+                           ? (mWidth - TEXTURE_LEFT_WIDTH)
+                           : TEXTURE_WIDTH;
+  gameStartRightLine = std::min(gameStartRightLine, stageRightLine);
+  preGameRightLine = (gameStartRightLine + stageRightLine) / 2;
+  preGameRightLine = std::min(preGameRightLine, stageRightLine);
+
+  return result;
+}
+
+#else
+
+#error \
+    "Unsupported game version for LawnAppScreenWidthHeight hook. You may try the above 2 versions."
+
+#endif
+
+inline bool readMaxZoomButton() {
+  // PvZ2 设置文件路径
+  static const std::string settings_xml_path = "/data/data/" +
+                                               DirectInstallOBB::get_package_name() +
+                                               "/shared_prefs/com.popcap.PvZ2.PvZ2GameActivity.xml";
+
+  // 特判边界情况（应该不会出现）
+  tinyxml2::XMLDocument doc;
+  if (doc.LoadFile(settings_xml_path.c_str()) != tinyxml2::XML_SUCCESS)
+    return false;
+  tinyxml2::XMLElement *root = doc.FirstChildElement("map");
+  if (!root)
+    return false;
+
+  // 遍历 XML 元素，查找名为 "HasDisabledUsageSharing" 的属性，并返回其布尔值
+  for (tinyxml2::XMLElement *elem = root->FirstChildElement(); elem != nullptr;
+       elem = elem->NextSiblingElement()) {
+    const char *name = elem->Attribute("name");
+    if (name && strcmp(name, "HasDisabledUsageSharing") == 0)
+      return elem->BoolAttribute("value");
+  }
+
+  // 不存在则为 false
+  return false;
+}
+
+// 定义原函数的函数原型
+typedef int (*BoardZoom)(int a1);
+static BoardZoom oBoardZoom = nullptr;
+
+int hkBoardZoom(int a1) {
+  if (!a1)
+    return 0;
+  // 先跑原函数
+  int result = oBoardZoom(a1);
+  // 改变选卡时视野左边缘与棋盘左边缘的距离
+  if (readMaxZoomButton())
+    *(_DWORD *)(a1 + 880) = preGameRightLine - mWidth;
+  return result;
+}
+
+// 定义原函数的函数原型
+typedef int (*BoardZoom2)(int a1);
+static BoardZoom2 oBoardZoom2 = nullptr;
+
+int hkBoardZoom2(int a1) {
+  if (!a1)
+    return 0;
+  int result = oBoardZoom2(a1);
+  if (readMaxZoomButton()) {
+    // 缩放系数
+    *(float *)(a1 + 860) = 1.0f;
+    // 改变视野左边缘与棋盘左边缘的距离
+    *(_DWORD *)(a1 + 824) = -(gameStartRightLine - mWidth);
+    // 顶部基准线
+    *(_DWORD *)(a1 + 868) = (_DWORD)mOrigScreenHeight;
+  }
+  return result;
+}
+
+inline void process() {
+  if constexpr (ENABLE) {
+    // 得到缩放前后尺寸
+    PVZ2HookFunction(LawnAppScreenWidthHeightAddr, (void *)hkLawnAppScreenWidthHeight,
+                     (void **)&oLawnAppScreenWidthHeight, "LawnApp::SetScreenWidthHeight");
+    // 控制屏幕缩放
+    PVZ2HookFunction(BoardZoomAddr, (void *)hkBoardZoom, (void **)&oBoardZoom, "BoardZoom");
+    PVZ2HookFunction(BoardZoom2Addr, (void *)hkBoardZoom2, (void **)&oBoardZoom2, "BoardZoom2");
+  }
+}
+}  // namespace MaxZoom
+
 #if GAME_VERSION < 1031
 
 namespace AliasToID {
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+constexpr bool ENABLE = PlantNameMapperAddr != UNKNOWN && firstFreePlantID != UNKNOWN;
+
 class PlantNameMapper {
  public:
   void *vftable;
@@ -245,7 +440,7 @@ std::vector<Sexy::SexyString> g_modPlantTypenames;
 #define REGISTER_PLANT_TYPENAME(typename) g_modPlantTypenames.push_back(typename);
 
 typedef PlantNameMapper *(*PlantNameMapperCtor)(PlantNameMapper *);
-PlantNameMapperCtor oPlantNameMapperCtor = nullptr;
+static PlantNameMapperCtor oPlantNameMapperCtor = nullptr;
 
 void *hkCreatePlantNameMapper(PlantNameMapper *self) {
   oPlantNameMapperCtor(self);
@@ -262,62 +457,23 @@ void *hkCreatePlantNameMapper(PlantNameMapper *self) {
 }
 
 inline void process() {
-  if constexpr (PlantNameMapperAddr != UNKNOWN && firstFreePlantID != UNKNOWN)
+  if constexpr (ENABLE)
     PVZ2HookFunction(PlantNameMapperAddr, (void *)hkCreatePlantNameMapper,
                      (void **)&oPlantNameMapperCtor, "PlantNameMapper::PlantNameMapper");
 }
+
 #undef REGISTER_PLANT_TYPENAME
 }  // namespace AliasToID
 
 #endif
 
-namespace LogOutput {
-typedef int (*LogOutputFunc)(char *, ...);
-LogOutputFunc oLogOutputFunc = nullptr;
-std::mutex g_logMutex;
-
-int hkLogOutputFunc(char *format, ...) {
-  if (!oLogOutputFunc) {
-    LOGI("LogOutputFunc: Original function pointer is null");
-    return -1;
-  }
-  std::lock_guard<std::mutex> lock(g_logMutex);
-
-  va_list va, va_cpy;
-  va_start(va, format);
-  va_copy(va_cpy, va);
-
-  // 计算所需长度
-  va_start(va, format);
-  char *buffer, temp[1];
-  int len = vsnprintf(temp, 0, format, va);
-  va_end(va);
-
-  va_start(va, format);
-  buffer = new char[len + 1];
-  len = vsnprintf(buffer, len + 1, format, va);
-  buffer[len] = '\0';
-  LOGI("LogOutputFunc: %s", buffer);
-
-  int result = oLogOutputFunc(format, va_cpy);
-  va_end(va_cpy);
-  va_end(va);
-  delete[] buffer;
-  return result;
-}
-
-void process() {
-  // 输出主日志
-  if constexpr (LogOutputFuncAddr != UNKNOWN)
-    PVZ2HookFunction(LogOutputFuncAddr, (void *)hkLogOutputFunc, (void **)&oLogOutputFunc,
-                     "LogOutputFunc");
-}
-}  // namespace LogOutput
-
 namespace CDNExpansion {
 // 在此感谢CZ的技术专栏分享，我将变量名和一些方式进行了小小的改变，但依旧需要对其为技术的分享表达感谢！！！！！
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+constexpr bool ENABLE = CDNLoadAddr != UNKNOWN;
+
 typedef int (*CDNExpand)(int *a1, const Sexy::SexyString &rtonName, int rtonTable, int a4);
-CDNExpand oCDNLoad = nullptr;
+static CDNExpand oCDNLoad = nullptr;
 
 std::atomic<bool> executed(false);
 
@@ -352,12 +508,63 @@ int hkCDNLoad(int *a1, const Sexy::SexyString &rtonName, int rtonTable, int a4) 
 
 inline void process() {
   // CDN读取rton，感谢CZ技术专栏分享技术！！！
-  if constexpr (CDNLoadAddr != UNKNOWN)
+  if constexpr (ENABLE)
     PVZ2HookFunction(CDNLoadAddr, (void *)hkCDNLoad, (void **)&oCDNLoad, "CDNLoadExpansion");
 }
 }  // namespace CDNExpansion
 
+namespace LogOutput {
+// 游戏自己的日志输出转发到 logcat：原函数是变参 printf 形，先按格式串格式化再原样转调。
+
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+constexpr bool ENABLE = LogOutputFuncAddr != UNKNOWN;
+
+typedef int (*LogOutputFunc)(char *format, ...);
+static LogOutputFunc oLogOutputFunc = nullptr;
+static std::mutex g_logMutex;
+
+int hkLogOutputFunc(char *format, ...) {
+  if (!oLogOutputFunc) {
+    LOGI("LogOutputFunc: Original function pointer is null");
+    return -1;
+  }
+  std::lock_guard<std::mutex> lock(g_logMutex);
+
+  va_list va, va_cpy;
+  va_start(va, format);
+  va_copy(va_cpy, va);
+
+  // 计算所需长度
+  va_start(va, format);
+  char *buffer, temp[1];
+  int len = vsnprintf(temp, 0, format, va);
+  va_end(va);
+
+  va_start(va, format);
+  buffer = new char[len + 1];
+  len = vsnprintf(buffer, len + 1, format, va);
+  buffer[len] = '\0';
+  LOGI("LogOutputFunc: %s", buffer);
+
+  int result = oLogOutputFunc(format, va_cpy);
+  va_end(va_cpy);
+  va_end(va);
+  delete[] buffer;
+  return result;
+}
+
+inline void process() {
+  // 输出主日志
+  if constexpr (ENABLE)
+    PVZ2HookFunction(LogOutputFuncAddr, (void *)hkLogOutputFunc, (void **)&oLogOutputFunc,
+                     "LogOutputFunc");
+}
+}  // namespace LogOutput
+
 namespace RSBDecrypt {
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+constexpr bool ENABLE = RSBPathRecorderAddr != UNKNOWN && ResourceManagerFuncAddr != UNKNOWN;
+
 // C++11 兼容的编译期字符串混淆
 template <size_t... Is>
 struct index_sequence {};
@@ -491,7 +698,7 @@ void cleanupTempFiles() {
 
 // Hook 函数
 typedef int (*RSBPathRecorder)(uint *a1);
-RSBPathRecorder oRSBPathRecorder = nullptr;
+static RSBPathRecorder oRSBPathRecorder = nullptr;
 
 int hkRSBPathRecorder(uint *a1) {
   LOGI("Hooking RSBPathRecorder");
@@ -718,7 +925,7 @@ int hkRSBPathRecorder(uint *a1) {
 }
 
 inline void process() {
-  if constexpr (RSBPathRecorderAddr != UNKNOWN && ResourceManagerFuncAddr != UNKNOWN) {
+  if constexpr (ENABLE) {
     // Hook RSB 读取函数
     PVZ2HookFunction(RSBPathRecorderAddr, (void *)hkRSBPathRecorder, (void **)&oRSBPathRecorder,
                      "ResourceManager::RSBPathRecorder");
@@ -727,10 +934,13 @@ inline void process() {
 }  // namespace RSBDecrypt
 
 namespace PrimeGlyphCacheLimitation {
-typedef uint *(*PrimeGlyphCacheLimitation)(uint *, int, int, int);
-PrimeGlyphCacheLimitation oPrimeGlyphCacheLimitation = nullptr;
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+constexpr bool ENABLE = PrimeGlyphCacheAddr != UNKNOWN;
 
 // 一路：高端设备缓冲大小为2048，中端设备为1024，低端设备为512。经过测试，缓冲大小最大只能设为2048，设为更高值，会导致进入游戏后文字渲染全为空白，这与设为0的效果一致。
+typedef uint *(*PrimeGlyphCacheLimitation)(uint *a1, int a2, int a3, int a4);
+static PrimeGlyphCacheLimitation oPrimeGlyphCacheLimitation = nullptr;
+
 uint *hkPrimeGlyphCacheLimitation(uint *a1, int a2, int a3, int a4) {
   uint *result = oPrimeGlyphCacheLimitation(a1, a2, a3, a4);
   a1[22] = 2048;
@@ -739,180 +949,32 @@ uint *hkPrimeGlyphCacheLimitation(uint *a1, int a2, int a3, int a4) {
 }
 
 inline void process() {
-  if constexpr (PrimeGlyphCacheAddr != UNKNOWN)
+  if constexpr (ENABLE)
     PVZ2HookFunction(PrimeGlyphCacheAddr, (void *)hkPrimeGlyphCacheLimitation,
                      (void **)&oPrimeGlyphCacheLimitation,
                      "PrimeGlyphCache::PrimeGlyphCacheLimitation");
 }
 }  // namespace PrimeGlyphCacheLimitation
 
-namespace MaxZoom {
-
-constexpr int TEXTURE_WIDTH = 2048, TEXTURE_LEFT_WIDTH = 556, TEXTURE_RIGHT_WIDTH = 1345;
-constexpr int stageRightLine = TEXTURE_WIDTH + TEXTURE_RIGHT_WIDTH;
-
-// 选卡界面与正式游戏视野右边缘（相对于棋盘左侧边缘的距离）
-int gameStartRightLine, preGameRightLine;
-
-// 设备分辨率
-#ifdef _DEBUG
-int mOrigScreenWidth;
-#endif
-int mOrigScreenHeight;
-
-// 游戏分辨率
-int mWidth;
-#ifdef _DEBUG
-int mHeight;
-#endif
-
-// LawnAppScreenWidthHeight 的原函数会随版本变化。目前只知道 8.7.3 和 10.3.1
-// 的写法。其他版本欢迎补充。
-#if GAME_VERSION == 873
-
-typedef int (*LawnAppScreenWidthHeight)(int a1, int a2);
-LawnAppScreenWidthHeight oLawnAppScreenWidthHeight = nullptr;
-
-int hkLawnAppScreenWidthHeight(int a1, int a2) {
-  // 1. 先执行原函数，让内部逻辑完成内存写入
-  int result = oLawnAppScreenWidthHeight(a1, a2);
-
-  if (a1 == NULL)
-    return result;
-
-  // 2. 根据偏移直接提取数据
-  // 根据 sub_FFE7D0
-#ifdef _DEBUG
-  mOrigScreenWidth = *(_DWORD *)(a1 + 1512);
-#endif
-  mOrigScreenHeight = *(_DWORD *)(a1 + 1516);
-
-  // 根据自身
-  mWidth = *(_DWORD *)(a1 + 136);
-#ifdef _DEBUG
-  mHeight = *(_DWORD *)(a1 + 140);
-#endif
-
-  // 3. 输出日志
-  LOGI(R"(
---- LawnApp::SetWidthHeight Hook ---
-mOrigWidth: %d, mOrigHeight: %d
-mWidth: %d, mHeight: %d
-result: %d)",
-       mOrigScreenWidth, mOrigScreenHeight, mWidth, mHeight, result);
-
-  // 若游戏分辨率宽度大于棋盘和左侧的总宽度（足以让左侧全部显示），则使偏移与左侧宽度相同
-  // 否则使偏移等于游戏分辨率宽度减去棋盘宽度（即让右侧边缘与屏幕右侧对齐）
-  gameStartRightLine = (mWidth >= TEXTURE_WIDTH + TEXTURE_LEFT_WIDTH)
-                           ? (mWidth - TEXTURE_LEFT_WIDTH)
-                           : TEXTURE_WIDTH;
-  gameStartRightLine = std::min(gameStartRightLine, stageRightLine);
-  preGameRightLine = (gameStartRightLine + stageRightLine) / 2;
-  preGameRightLine = std::min(preGameRightLine, stageRightLine);
-
-  return result;
-}
-
-#elif GAME_VERSION == 1031
-
-typedef int (*LawnAppScreenWidthHeight)(float *a1, int a2);
-LawnAppScreenWidthHeight oLawnAppScreenWidthHeight = nullptr;
-
-int hkLawnAppScreenWidthHeight(float *a1, int a2) {
-  // 1. 先执行原函数，让内部逻辑完成内存写入
-  int result = oLawnAppScreenWidthHeight(a1, a2);
-
-  if (a1 == nullptr)
-    return result;
-
-  // 2. 根据偏移直接提取数据
-#ifdef _DEBUG
-  mOrigScreenWidth = *((_DWORD *)a1 + 325);
-#endif
-  mOrigScreenHeight = *((_DWORD *)a1 + 326);
-
-  mWidth = *((_DWORD *)a1 + 25);
-#ifdef _DEBUG
-  mHeight = *((_DWORD *)a1 + 26);
-#endif
-
-  // 3. 输出日志
-  LOGI(R"(
---- LawnApp::SetWidthHeight Hook ---
-mOrigWidth: %d, mOrigHeight: %d
-mWidth: %d, mHeight: %d
-result: %d)",
-       mOrigScreenWidth, mOrigScreenHeight, mWidth, mHeight, result);
-
-  // 若游戏分辨率宽度大于棋盘和左侧的总宽度（足以让左侧全部显示），则使偏移与左侧宽度相同
-  // 否则使偏移等于游戏分辨率宽度减去棋盘宽度（即让右侧边缘与屏幕右侧对齐）
-  gameStartRightLine = (mWidth >= TEXTURE_WIDTH + TEXTURE_LEFT_WIDTH)
-                           ? (mWidth - TEXTURE_LEFT_WIDTH)
-                           : TEXTURE_WIDTH;
-  gameStartRightLine = std::min(gameStartRightLine, stageRightLine);
-  preGameRightLine = (gameStartRightLine + stageRightLine) / 2;
-  preGameRightLine = std::min(preGameRightLine, stageRightLine);
-
-  return result;
-}
-
-#else
-
-#error \
-    "Unsupported game version for LawnAppScreenWidthHeight hook. You may try the above 2 versions."
-
-#endif
-
-// 定义原函数的函数原型
-typedef int (*OrigBoardZoom)(int a1);
-OrigBoardZoom oBoardZoom = nullptr;
-
-int hkBoardZoom(int a1) {
-  // 先跑原函数
-  int result = oBoardZoom(a1);
-  // 改变选卡时视野左边缘与棋盘左边缘的距离
-  *(_DWORD *)(a1 + 880) = preGameRightLine - mWidth;
-  return result;
-}
-
-// 定义原函数的函数原型
-typedef int (*OrigBoardZoom2)(int a1);
-OrigBoardZoom2 oBoardZoom2 = nullptr;
-
-int hkBoardZoom2(int a1) {
-  int result = oBoardZoom2(a1);
-  // 缩放系数
-  *(float *)(a1 + 860) = 1.0f;
-  // 改变视野左边缘与棋盘左边缘的距离
-  *(_DWORD *)(a1 + 824) = -(gameStartRightLine - mWidth);
-  // 顶部基准线
-  *(_DWORD *)(a1 + 868) = (_DWORD)mOrigScreenHeight;
-  return result;
-}
-
-inline void process() {
-  if constexpr (LawnAppScreenWidthHeightAddr != UNKNOWN && BoardZoomAddr != UNKNOWN &&
-                BoardZoom2Addr != UNKNOWN) {
-    // 得到缩放前后尺寸
-    PVZ2HookFunction(LawnAppScreenWidthHeightAddr, (void *)hkLawnAppScreenWidthHeight,
-                     (void **)&oLawnAppScreenWidthHeight, "LawnApp::SetScreenWidthHeight");
-    // 控制屏幕缩放
-    PVZ2HookFunction(BoardZoomAddr, (void *)hkBoardZoom, (void **)&oBoardZoom, "BoardZoom");
-    PVZ2HookFunction(BoardZoom2Addr, (void *)hkBoardZoom2, (void **)&oBoardZoom2, "BoardZoom2");
-  }
-}
-}  // namespace MaxZoom
-
 namespace WorldMapVerticalScrolling {
 // 本来我完全可以让你们每个版本都去找通用的三个偏移的，但是为了你们旧版本的，我采用条件编译了
 // 旧版只需要找一个偏移，而新版则需要找三个
+
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+#if GAME_VERSION >= 1001
+constexpr bool ENABLE =
+    WorldMapScrollAddr != UNKNOWN && KeepCenterAddr != UNKNOWN && ScrollInertanceAddr != UNKNOWN;
+#else
+constexpr bool ENABLE = WorldMapDoMovementAddr != UNKNOWN;
+#endif
 
 #if GAME_VERSION >= 1001
 
 // 新版需要hook三个函数，而且由于该死的内联，不能把函数全反编译了，所以直接暴力扩边界让它们强行切到垂直移动判定
 // 拖动函数:
 typedef int (*WorldMapScroll)(int, int, int);
-WorldMapScroll oWorldMapScroll = nullptr;
+static WorldMapScroll oWorldMapScroll = nullptr;
+
 int hkWorldMapScroll(int a1, int a2, int a3) {
   *(int32_t *)(a1 + 312) = -1000000000;
   *(int32_t *)(a1 + 316) = -1000000000;
@@ -920,9 +982,11 @@ int hkWorldMapScroll(int a1, int a2, int a3) {
   *(int32_t *)(a1 + 324) = 2000000000;
   return oWorldMapScroll(a1, a2, a3);
 }
+
 // 居中函数：
 typedef int (*KeepCenter)(int, uint *, bool);
-KeepCenter oKeepCenter = nullptr;
+static KeepCenter oKeepCenter = nullptr;
+
 int hkKeepCenter(int a1, uint *a2, bool a3) {
   *(int32_t *)(a1 + 312) = -1000000000;
   *(int32_t *)(a1 + 316) = -1000000000;
@@ -930,9 +994,11 @@ int hkKeepCenter(int a1, uint *a2, bool a3) {
   *(int32_t *)(a1 + 324) = 2000000000;
   return oKeepCenter(a1, a2, true);
 }
+
 // 惯性函数：
 typedef int (*ScrollInertance)(int);
-ScrollInertance oScrollInertance = nullptr;
+static ScrollInertance oScrollInertance = nullptr;
+
 int hkScrollInertance(int a1) {
   *(int32_t *)(a1 + 312) = -1000000000;
   *(int32_t *)(a1 + 316) = -1000000000;
@@ -944,8 +1010,8 @@ int hkScrollInertance(int a1) {
 #else
 
 // 旧函数（10.0版本前有效）
-typedef int (*worldMapDoMovement)(void *, float, float, bool);
-worldMapDoMovement oWorldMapDoMovement = nullptr;
+typedef int (*WorldMapDoMovement)(void *, float, float, bool);
+static WorldMapDoMovement oWorldMapDoMovement = nullptr;
 
 // 是否移动
 bool g_allowVerticalMovement = true;
@@ -960,8 +1026,7 @@ int hkWorldMapDoMovement(void *map, float fX, float fY, bool allowVerticalMoveme
 inline void process() {
 #if GAME_VERSION >= 1001
 
-  if constexpr (WorldMapScrollAddr != UNKNOWN && KeepCenterAddr != UNKNOWN &&
-                ScrollInertanceAddr != UNKNOWN) {
+  if constexpr (ENABLE) {
     // 拖动函数
     PVZ2HookFunction(WorldMapScrollAddr, (void *)hkWorldMapScroll, (void **)&oWorldMapScroll,
                      "WorldMap::WorldMapScroll");
@@ -975,7 +1040,7 @@ inline void process() {
 
 #else
 
-  if constexpr (WorldMapDoMovementAddr != UNKNOWN)
+  if constexpr (ENABLE)
     PVZ2HookFunction(WorldMapDoMovementAddr, (void *)hkWorldMapDoMovement,
                      (void **)&oWorldMapDoMovement, "WorldMap::doMovement");
 
@@ -985,21 +1050,24 @@ inline void process() {
 
 namespace HookResourceManagerFunc {
 
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+constexpr bool ENABLE = ResourceManagerFuncAddr != UNKNOWN;
+
 #define USE_DIRECT_INSTALL_OBB
 #define USE_RSB_DECRYPT
 
 // 直装包卡主进程以及 ROOT 检测
 typedef int (*ResourceManagerFunc)(int, int, int);
-ResourceManagerFunc oResourceManagerFunc = nullptr;
+static ResourceManagerFunc oResourceManagerFunc = nullptr;
 
 int hkResourceManagerFunc(int a1, int a2, int a3) {
-  LOGI("Hooking ResourcesManagerFunc");
+  LOGI("ResourceManagerFunc hook entered.");
 
 #ifdef USE_DIRECT_INSTALL_OBB
   DirectInstallOBB::delay_PvZ2();
 #endif
 
-  int result = oResourceManagerFunc(a1, a2, a3);
+  int backdata = oResourceManagerFunc(a1, a2, a3);
 
 #ifdef USE_RSB_DECRYPT
   // 如果检测到ROOT，则进入秒删模式
@@ -1009,36 +1077,741 @@ int hkResourceManagerFunc(int a1, int a2, int a3) {
   }
 #endif
 
-  LOGI("Hooking ResourcesManagerFunc End");
-  return result;
+  LOGI("ResourceManagerFunc hook done.");
+  return backdata;
 }
 
 inline void process() {
-  if constexpr (ResourceManagerFuncAddr != UNKNOWN)
+  if constexpr (ENABLE)
     PVZ2HookFunction(ResourceManagerFuncAddr, (void *)hkResourceManagerFunc,
                      (void **)&oResourceManagerFunc, "ResourceManager::ResourceManagerFunc");
 }
 }  // namespace HookResourceManagerFunc
 
+namespace EnableDangerRoomRestart {
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+constexpr bool ENABLE = PauseMenuShowAddr != UNKNOWN;
+
+typedef int (*ShowPauseMenu)(void *a1, int a2, int a3, int a4, int a5);
+static ShowPauseMenu oShowPauseMenu = nullptr;
+
+int hkShowPauseMenu(void *a1, int a2, int a3, int a4, int a5) {
+  return oShowPauseMenu(a1, a2, a3, 0, a5);
+}
+
+inline void process() {
+  if constexpr (ENABLE)
+    PVZ2HookFunction(PauseMenuShowAddr, (void *)hkShowPauseMenu, (void **)&oShowPauseMenu,
+                     "ShowPauseMenu");
+}
+}  // namespace EnableDangerRoomRestart
+
+namespace DisableAlmanacTutorial {
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+constexpr bool ENABLE = AlmanacStateUpdateAddr != UNKNOWN && TutorialCheckAddr != UNKNOWN &&
+                        NarrativeCheckAddr != UNKNOWN;
+
+// Hook 1: 阻止图鉴内 FindMore 强制点击
+typedef int (*AlmanacStateUpdate)(int a1, int state);
+static AlmanacStateUpdate oAlmanacStateUpdate = nullptr;
+
+int hkAlmanacStateUpdate(int a1, int state) {
+  if (state > 1)
+    state = 1;
+  return oAlmanacStateUpdate(a1, state);
+}
+
+// Hook 2: 阻止 ALMANAC_INTRO 教程（前半段对话+强制开图鉴）
+// (int *result, void *context)
+// result+0:  byte  tutorial_active
+// result+16: dword tutorial_type (20 or 2 = ALMANAC_INTRO)
+typedef int (*TutorialCheck)(void *result, void *context);
+static TutorialCheck oTutorialCheck = nullptr;
+
+int hkTutorialCheck(void *result, void *context) {
+  int ret = oTutorialCheck(result, context);
+  if (result)
+    *(char *)result = 0;
+  return ret;
+}
+
+// Hook 3: 阻止 ALMANAC_INTRO 对话播放
+// R0=result, R1=SexyString* context
+// SexyString inline: byte0='\n', bytes1-5="egypt"
+typedef int (*NarrativeCheck)(void *result, void *context);
+static NarrativeCheck oNarrativeCheck = nullptr;
+
+int hkNarrativeCheck(void *result, void *context) {
+  int ret = oNarrativeCheck(result, context);
+  if (result)
+    *(char *)result = 0;
+  return ret;
+}
+
+inline void process() {
+  if constexpr (ENABLE) {
+    PVZ2HookFunction(AlmanacStateUpdateAddr, (void *)hkAlmanacStateUpdate,
+                     (void **)&oAlmanacStateUpdate, "AlmanacStateUpdate");
+    PVZ2HookFunction(TutorialCheckAddr, (void *)hkTutorialCheck, (void **)&oTutorialCheck,
+                     "TutorialCheck");
+    PVZ2HookFunction(NarrativeCheckAddr, (void *)hkNarrativeCheck, (void **)&oNarrativeCheck,
+                     "NarrativeCheck");
+  }
+}
+}  // namespace DisableAlmanacTutorial
+
+namespace GeneralFunction {
+// 通用工具（ARM32）：SexyString/句柄解析（弱指针系统）、属性列表、类型系统、实体动画
+// 与功能专属解耦：温暖（SnapdragonWarming）/化灰亡语（Ash）复用
+
+typedef int (*CtxGet)(void);
+static CtxGet oCtxGet = nullptr;
+typedef void (*SexyStringParse)(void *iter, int guard, int list);
+static SexyStringParse oSexyStringParse = nullptr;
+typedef bool (*SexyStringEmpty)(void *iter);
+static SexyStringEmpty oSexyStringEmpty = nullptr;
+typedef int (*GetHandle)(void *iter);
+static GetHandle oGetHandle = nullptr;
+typedef int (*HandleResolve)(int guard, int elem);
+static HandleResolve oHandleResolve = nullptr;
+typedef int (*CtxResolve)(int obj, void *iter);
+static CtxResolve oCtxResolve = nullptr;
+typedef int (*SexyStringDtor)(void *iter);
+static SexyStringDtor oSexyStringDtor = nullptr;
+typedef int (*SexyStringCtor)(void *str);
+static SexyStringCtor oSexyStringCtor = nullptr;
+typedef int (*SexyStringCopy)(void *dst, int src);
+static SexyStringCopy oSexyStringCopy = nullptr;
+typedef void (*SexyStringAssign)(void *dst, const void *data, int len);
+static SexyStringAssign oSexyStringAssign = nullptr;
+typedef int (*EntityListBind)(void *out, int props);
+static EntityListBind oEntityListBind = nullptr;
+typedef int (*RtClassCtor)(void);
+static RtClassCtor oRtClassCtor = nullptr;
+typedef int (*RegisterClass)(int rt, const char *name, int parent, int ctor);
+static RegisterClass oRegisterClass = nullptr;
+typedef int (*RegistryGet)(void);
+static RegistryGet oRegistryGet = nullptr;
+typedef int (*DirGet)(int registry);
+static DirGet oDirGet = nullptr;
+typedef void (*DirRegisterHandler)(int dir, void *name, int handler, int offset, int zero);
+static DirRegisterHandler oDirRegisterHandler = nullptr;
+typedef int (*ZombieAnimRigGet)(int a1);
+static ZombieAnimRigGet oZombieAnimRigGet = nullptr;
+
+// 弱指针解析链：src = 弱指针所在地址（槽位或拷贝出来的缓冲）
+static int resolveWeak(int *src) {
+  if (!src)
+    return 0;
+  int guard = oCtxGet();
+  int it[4] = {0};
+  oSexyStringParse(it, guard, (int)src);
+  int obj = 0;
+  if (!oSexyStringEmpty(it)) {
+    int e = oGetHandle(it);
+    int r = oHandleResolve(guard, e);
+    if (r)
+      obj = oCtxResolve(r, it);
+  }
+  oSexyStringDtor(it);
+  return obj;
+}
+
+// 实体+104 列表首元素即 AnimRig（SexyString 解析模式）
+static int getAnimRig(int dino) {
+  if (!dino)
+    return 0;
+  return resolveWeak((int *)(dino + 104));
+}
+
+// SexyString 数据指针（A32 12B：头@0 长度@4 指针@8）
+static const char *sexyStrPtr(int p) {
+  if (!p)
+    return "";
+  if (*(uint8_t *)p & 1)
+    return *(const char **)(p + 8);
+  return (const char *)(p + 1);
+}
+
+inline void process() {
+  if constexpr (CtxGetAddr != UNKNOWN) {
+    GeneralFunction::oCtxGet = (GeneralFunction::CtxGet)getActualOffset(CtxGetAddr);
+    GeneralFunction::oSexyStringParse =
+        (GeneralFunction::SexyStringParse)getActualOffset(SexyStringParseAddr);
+    GeneralFunction::oSexyStringEmpty =
+        (GeneralFunction::SexyStringEmpty)getActualOffset(SexyStringEmptyAddr);
+    GeneralFunction::oGetHandle = (GeneralFunction::GetHandle)getActualOffset(GetHandleAddr);
+    GeneralFunction::oHandleResolve =
+        (GeneralFunction::HandleResolve)getActualOffset(HandleResolveAddr);
+    GeneralFunction::oCtxResolve = (GeneralFunction::CtxResolve)getActualOffset(CtxResolveAddr);
+    GeneralFunction::oSexyStringDtor =
+        (GeneralFunction::SexyStringDtor)getActualOffset(SexyStringDtorAddr);
+    GeneralFunction::oSexyStringCtor =
+        (GeneralFunction::SexyStringCtor)getActualOffset(SexyStringCtorAddr);
+    GeneralFunction::oSexyStringCopy =
+        (GeneralFunction::SexyStringCopy)getActualOffset(SexyStringCopyAddr);
+    GeneralFunction::oSexyStringAssign =
+        (GeneralFunction::SexyStringAssign)getActualOffset(SexyStringAssignAddr);
+    GeneralFunction::oEntityListBind =
+        (GeneralFunction::EntityListBind)getActualOffset(EntityListBindAddr);
+    GeneralFunction::oRtClassCtor = (GeneralFunction::RtClassCtor)getActualOffset(RtClassCtorAddr);
+    GeneralFunction::oRegistryGet = (GeneralFunction::RegistryGet)getActualOffset(RegistryGetAddr);
+    GeneralFunction::oDirGet = (GeneralFunction::DirGet)getActualOffset(DirGetAddr);
+    GeneralFunction::oZombieAnimRigGet =
+        (GeneralFunction::ZombieAnimRigGet)getActualOffset(ZombieAnimRigGetAddr);
+  }
+}
+}  // namespace GeneralFunction
+
+// 火龙草温暖只对 9.x 之前的版本有意义（高版本游戏自带），9.x 起不参与
+#if GAME_VERSION < 900
+
+namespace SnapdragonWarming {
+// 本 namespace 可用的前置条件：用到的地址（含 GeneralFunction 的）全部已适配
+constexpr bool ENABLE =
+    SnapdragonLoadAddr != UNKNOWN && WarmingCompFactoryAddr != UNKNOWN &&
+    WarmingSetPropsAddr != UNKNOWN && PowerListFindAddr != UNKNOWN &&
+    EntityListBindAddr != UNKNOWN && CtxGetAddr != UNKNOWN && SexyStringParseAddr != UNKNOWN &&
+    SexyStringEmptyAddr != UNKNOWN && GetHandleAddr != UNKNOWN && HandleResolveAddr != UNKNOWN &&
+    CtxResolveAddr != UNKNOWN && SexyStringDtorAddr != UNKNOWN && SexyStringCtorAddr != UNKNOWN &&
+    SexyStringCopyAddr != UNKNOWN && SexyStringAssignAddr != UNKNOWN;
+
+// 低版本火龙草（Snapdragon）温暖功能（WarmingRadius）
+// 根因：Snapdragon loader（vtable 槽 7）只解析 "BreathBurst"，不解析 WarmingRadius；
+// PlantSnapdragon props 也没有 m_warmingRadius 成员（16 字节只有 m_breathBurst@+8）。
+// 共享温暖系统完好（Pepperpult 等 9 个植物正常）。
+// 修法：hook 后模仿 Pepperpult loader，创建 ComponentWarmingRadius（经附加工厂加入 ctx+44
+// 组件列表，与呼吸火柱同机制被驱动），再从 animRig 的 PowerPropsWarmingRadius (type=2)
+// 拷配置。注意不把组件弱指针写进 a1+8（那是 m_breathBurst 槽位）；组件已进组件列表，
+// 直接用附加工厂的返回值。配置中无此项则跳过。
+
+// ==== 内部函数（ARM32 偏移，经 getActualOffset 解析，o 前缀 = 原函数指针）====
+typedef int (*WarmingCompFactory)(int ctx, int mainlist, int name);
+static WarmingCompFactory oWarmingCompFactory = nullptr;
+typedef int (*WarmingSetProps)(int comp, int props);
+static WarmingSetProps oWarmingSetProps = nullptr;
+typedef int (*PowerListFind)(void *out, int list, int type, int sub);
+static PowerListFind oPowerListFind = nullptr;
+
+typedef int (*SnapdragonLoad)(int a1);
+static SnapdragonLoad oSnapdragonLoad = nullptr;
+
+// 遍历列表取第一个解析上下文（模仿 SexyString 解析系列），返回上下文或 0
+static int listFirst(int list) {
+  int guard = GeneralFunction::oCtxGet();
+  int it[4] = {0};
+  GeneralFunction::oSexyStringParse(it, guard, list);
+  int ctx = 0;
+  if (!GeneralFunction::oSexyStringEmpty(it)) {
+    int v5 = GeneralFunction::oGetHandle(it);
+    int v6 = GeneralFunction::oHandleResolve(guard, v5);
+    if (v6)
+      ctx = GeneralFunction::oCtxResolve(v6, it);
+  }
+  GeneralFunction::oSexyStringDtor(it);
+  return ctx;
+}
+
+int hkSnapdragonLoad(int a1) {
+  if (!a1)
+    return 0;
+  LOGI("[SnapWarm] Load enter a1=%p", (void *)a1);
+  // 先执行原函数（BreathBurst 呼吸火柱正常解析，含尾部虚调用）
+  int ret = oSnapdragonLoad(a1);
+  LOGI("[SnapWarm] OrigLoad done");
+
+  // a1 = PlantSnapdragon；a1+4 = 植物属性表(props)；a1+8 = m_breathBurst 槽（不能写！）
+  int props = *(_DWORD *)(a1 + 4);
+  if (!props)
+    return ret;
+
+  // 1. 取 powers[0] 上下文（组件容器，与原函数 BreathBurst 相同）
+  int ctx = listFirst(props + 72);
+  if (!ctx)
+    return ret;
+
+  // 2. 主属性列表 SexyString（props+8，模仿 Pepperpult loader 的 v36）
+  int v36[3] = {0};
+  GeneralFunction::oSexyStringCtor(v36);
+  GeneralFunction::oSexyStringCopy(v36, props + 8);
+
+  // 3. "WarmingRadius" SexyString（长度 13 超过内联容量 11，引擎内部走堆）
+  int name[3] = {0};
+  GeneralFunction::oSexyStringAssign(name, "WarmingRadius", sizeof("WarmingRadius") - 1);
+
+  // 4. 创建温暖组件并附加（内部: 名字/列表写入组件 + 初始化/激活 + 加入 ctx+44 列表）
+  int comp = oWarmingCompFactory(ctx, (int)v36, (int)name);
+  LOGI("[SnapWarm] comp=%p", (void *)comp);
+
+  // 5. 清理 SexyString
+  if (name[0] & 1)
+    operator delete((void *)name[2]);
+  GeneralFunction::oSexyStringDtor(v36);
+
+  if (!comp)
+    return ret;
+
+  // 6. 从 props+248 取实体列表，遍历取实体，再按 (type=2, sub=0) 从 animRig powers 找 PowerProps
+  int v24 = 0;
+  {
+    int v30[2] = {0};
+    GeneralFunction::oEntityListBind(v30, props);
+    int v18 = listFirst((int)v30);
+
+    if (v18) {
+      int v31[2] = {0};
+      oPowerListFind(v31, v18 + 116, 2, 0);
+      v24 = listFirst((int)v31);
+      LOGI("[SnapWarm] v24=%p", (void *)v24);
+    }
+
+    // 配置字段验证（不调用 IsA 虚函数——vtable 槽 4 不可靠会崩）
+    LOGI("[SnapWarm] IsA check");
+    if (v24) {
+      float radius = *(float *)(v24 + 40);
+      LOGI("[SnapWarm] radius=%f", radius);
+      if (!(radius > 0.0f && radius < 50.0f))
+        v24 = 0;
+    }
+  }
+  LOGI("[SnapWarm] v24b=%p", (void *)v24);
+
+  // 7. 配置里有 WarmingRadius 才拷贝温暖参数（PowerPropsWarmingRadius.WarmingRadius@40）
+  if (v24) {
+    LOGI("[SnapWarm] SetProps enter r=%f c=%f t=%f d=%f g=%f", *(float *)(v24 + 40),
+         *(float *)(v24 + 44), *(float *)(v24 + 48), *(float *)(v24 + 176), *(float *)(v24 + 184));
+    oWarmingSetProps(comp, v24 + 40);
+    LOGI("[SnapWarm] SetProps done");
+    LOGI("[SnapdragonWarm] WarmingRadius applied (comp=%p)", (void *)comp);
+  } else {
+    LOGI("[SnapdragonWarm] WarmingRadius power not found in config, skip");
+  }
+  return ret;
+}
+
+inline void process() {
+  if constexpr (ENABLE) {
+    oWarmingCompFactory = (WarmingCompFactory)getActualOffset(WarmingCompFactoryAddr);
+    oPowerListFind = (PowerListFind)getActualOffset(PowerListFindAddr);
+    oWarmingSetProps = (WarmingSetProps)getActualOffset(WarmingSetPropsAddr);
+    PVZ2HookFunction(SnapdragonLoadAddr, (void *)hkSnapdragonLoad, (void **)&oSnapdragonLoad,
+                     "Snapdragon::Load");
+  }
+}
+
+}  // namespace SnapdragonWarming
+
+#endif
+
+namespace AshDeathrattleFix {
+// 本 namespace 可用的前置条件（只列入口依赖：vtable 名单是**动态表**，运行时逐条遍历、逐条跳过
+// UNKNOWN，不能塞进 constexpr）
+constexpr bool ENABLE = ZombieAnimRigGetAddr != UNKNOWN && ZombieAnimPauseAddr != UNKNOWN;
+
+// 化灰亡语修复：僵尸 vtable 槽 183 = 死亡收尾——化灰致命伤害（a2+8 标志 0x840，火/电）后
+// 原动画只被渲染禁用、时钟不停，指令帧（扔小鬼/砸植物）照常触发，死后仍执行。
+// 修法：化灰时解析 AnimRig 并暂停动画（mPaused=1），特效由伤害系统照常播。
+// 1. 巨人基类（5 个 vtable 共享）：hook 槽 183 实现函数
+// 2. 继承僵尸（槽 183 = nullsub，不能 hook）：patch 各自 vtable 槽 183 数据
+// 加僵尸只补配置表行。
+
+typedef int (*ZombieAnimPause)(int rig, char paused);
+static ZombieAnimPause oZombieAnimPause = nullptr;
+
+// ===== 1. 巨人基类：hook 死亡收尾函数（槽 183 实现，5 个巨人 vtable 共享）=====
+// 配置表：每僵尸一行（槽 183 死亡收尾函数地址 + 化灰标志掩码）
+struct AshDeathrattleEntry {
+  size_t deathFuncAddr;   // 槽 183 死亡收尾（hook 点）
+  unsigned int ashFlags;  // 化灰标志（a2+8 & ashFlags != 0 = 化灰死亡）
+};
+
+constexpr AshDeathrattleEntry kAshEntries[] = {
+    {GargantuarDeathAddr, 0x840},  // 巨人基类
+
+    // 新僵尸：{ 槽183死亡收尾函数地址, 化灰标志掩码 }
+};
+constexpr size_t kAshEntryCount = sizeof(kAshEntries) / sizeof(kAshEntries[0]);
+static void *oDeathFuncs[kAshEntryCount];
+
+template <size_t I>
+int hkDeath(int a1, int a2) {  // a1 = 僵尸实体, a2 = 伤害对象
+  if (a2 && (*(unsigned int *)(a2 + 8) & kAshEntries[I].ashFlags) != 0) {
+    int rig = a1 ? GeneralFunction::oZombieAnimRigGet(a1) : 0;
+    if (rig) {
+      oZombieAnimPause(rig, 1);  // 官方暂停动画（mPaused=1），指令帧不再触发
+      LOGI("[AshFix] entry[%d] paused anim on ash death zombie=%p rig=%p", (int)I, (void *)a1,
+           (void *)rig);
+    }
+  }
+  return ((int (*)(int, int))oDeathFuncs[I])(a1, a2);
+}
+
+template <size_t I>
+inline void hookDeathFinishFuncs() {
+  if constexpr (I < kAshEntryCount) {
+    PVZ2HookFunction(kAshEntries[I].deathFuncAddr, (void *)hkDeath<I>, (void **)&oDeathFuncs[I],
+                     "ZombieAshDeath");
+    hookDeathFinishFuncs<I + 1>();
+  }
+}
+
+// ===== 2. 继承自基类：patch vtable 槽 183（nullsub 空函数不能 hook，改 vtable 数据）=====
+// 配置表：每僵尸一行（vtable 起始地址 + 化灰标志掩码）
+struct AshDeathrattleVtableEntry {
+  size_t vtableAddr;      // 僵尸 vtable 起始（槽 183 = 死亡收尾，patch 该槽）
+  unsigned int ashFlags;  // 化灰标志（a2+8 & ashFlags != 0 = 化灰死亡）
+};
+
+constexpr size_t kDeathSlotOffset = 183 * 4;  // 槽 183（ARM32 指针 4 字节）
+
+constexpr AshDeathrattleVtableEntry kVtableEntries[] = {
+    {BullVtableAddr, 0x840},              // ZombieBull
+    {ZCorpImpVtableAddr, 0x840},          // ZombieZCorpImp
+    {BullVeteranVtableAddr, 0x840},       // ZombieBullVeteran（专属 vtable）
+    {DinoBullyVeteranVtableAddr, 0x840},  // ZombieDinoBullyVeteran（专属 vtable）
+
+    // 新僵尸：{ vtable 起始地址, 化灰标志掩码 },
+};
+constexpr size_t kVtableEntryCount = sizeof(kVtableEntries) / sizeof(kVtableEntries[0]);
+static void *oSlotFuncs[kVtableEntryCount];
+
+template <size_t I>
+int hkDeathSlot(int a1, int a2) {  // 槽 183 虚调：a1 = 僵尸实体, a2 = 伤害对象
+  if (a2 && (*(unsigned int *)(a2 + 8) & kVtableEntries[I].ashFlags) != 0) {
+    int rig = a1 ? GeneralFunction::oZombieAnimRigGet(a1) : 0;
+    if (rig) {
+      oZombieAnimPause(rig, 1);  // 官方暂停动画（mPaused=1），指令帧不再触发
+      LOGI("[AshFix] vtbl[%d] paused anim on ash death zombie=%p rig=%p", (int)I, (void *)a1,
+           (void *)rig);
+    }
+  }
+  return ((int (*)(int, int))oSlotFuncs[I])(a1, a2);  // 原槽函数（nullsub，空操作）
+}
+
+template <size_t I>
+inline void patchDeathSlot() {
+  if constexpr (I < kVtableEntryCount) {
+    size_t vtableActual =
+        getActualOffset(kVtableEntries[I].vtableAddr);  // 运行时地址（libBase + 偏移）
+    void **slot = (void **)(vtableActual + kDeathSlotOffset);
+    oSlotFuncs[I] = *slot;  // 保存原槽函数（nullsub）
+    patchVFTable((void *)vtableActual, (void *)hkDeathSlot<I>,
+                 183);  // 库自带 vtable patch（内建 mprotect）
+    LOGI("[AshFix] patched vtable slot 183 at %p -> %p", (void *)slot, (void *)hkDeathSlot<I>);
+    patchDeathSlot<I + 1>();
+  }
+}
+
+inline void process() {
+  if constexpr (ENABLE) {
+    oZombieAnimPause = (ZombieAnimPause)getActualOffset(ZombieAnimPauseAddr);
+    hookDeathFinishFuncs<0>();  // 巨人基类：hook 死亡收尾函数
+    patchDeathSlot<0>();        // 继承自基类：patch vtable 槽 183
+  }
+}
+
+}  // namespace AshDeathrattleFix
+
+namespace SpringBeanPFInvuln {
+// 本 namespace 可用的前置条件：用到的地址全部已适配
+constexpr bool ENABLE = IsPlantFoodActiveAddr != UNKNOWN && SpringBeanDieAddr != UNKNOWN &&
+                        SpringBeanVtableAddr != UNKNOWN;
+
+// 弹簧豆 PF 期间无敌修复：正常植物槽 81 先查 IsPlantFoodActive（+232 标志），PF 中不死；
+// SpringBean 槽 81 无检查直接走死亡汇聚点，PF 期间被秒杀。
+// 修法：vtable 槽 81 替换（不碰代码区）。代码 hook 会越界覆盖邻槽函数（槽 81 实现仅 12B）。
+typedef int (*IsPlantFoodActive)(int a1);
+static IsPlantFoodActive oIsPlantFoodActive = nullptr;
+typedef int (*SpringBeanDie)(int entity);
+static SpringBeanDie oSpringBeanDie = nullptr;
+
+int hkSpringBeanDie(int entity) {
+  if (!entity)
+    return 0;
+  LOGI("[PFInvuln] SpringBeanDie entity=%p", (void *)entity);
+  int container = *(int *)(entity + 4);  // 实体+4 = 容器
+  if (oIsPlantFoodActive(container))
+    return 0;  // PF 中：跳过死亡处理（不掉血不死，返回 0 = 未执行死亡）
+  return oSpringBeanDie(entity);
+}
+
+inline void process() {
+  if constexpr (ENABLE) {
+    oIsPlantFoodActive = (IsPlantFoodActive)getActualOffset(IsPlantFoodActiveAddr);
+    oSpringBeanDie = (SpringBeanDie)getActualOffset(SpringBeanDieAddr);
+    size_t vtableActual = getActualOffset(SpringBeanVtableAddr);  // vtable 数据实际地址
+    patchVFTable((void *)vtableActual, (void *)hkSpringBeanDie, kSpringBeanDieSlot);
+    LOGI("[PFInvuln] patched vtable slot %d at %p -> %p", kSpringBeanDieSlot,
+         (void *)(vtableActual + kSpringBeanDieSlot * sizeof(void *)), (void *)hkSpringBeanDie);
+  }
+}
+
+}  // namespace SpringBeanPFInvuln
+
+// skin 装扮搬运只对 9.x 之前的版本有意义（高版本游戏自带），9.x 起不参与
+#if GAME_VERSION < 900
+
+namespace CostumeSkinPort {
+// 本 namespace 可用的前置条件：用到的地址（含 GeneralFunction 的）全部已适配
+constexpr bool ENABLE = CostumeFindItemAddr != UNKNOWN && CostumeGetIdAddr != UNKNOWN &&
+                        CostumeAnimRateGetAddr != UNKNOWN && CostumeAnimRateSetAddr != UNKNOWN &&
+                        CostumeAnimApplierAddr != UNKNOWN && CostumeSwitchAddr != UNKNOWN &&
+                        CostumePreviewCtorAddr != UNKNOWN && HotUIPlantAnimAddr != UNKNOWN &&
+                        SexyStringAssignAddr != UNKNOWN;
+
+// 高版本 skin 装扮搬运（低版本上的实现）。
+// 目标：skin 装扮时植物改用 CostumeItemType 的 PopAnimName 创建动画对象，而非原生动画。
+//
+// 方案：CostumeItemType 是 vector 的内联 44B 元素（CostumeID@16 / PlantTypeName@20 /
+// LayerName@32），元素构建与搬移用编译期常量步长，结构不能扩、也没地方加新字段，所以
+// 不动布局、复用原有 LayerName 字段存标记：值以 "skin:" 开头即 skin 装扮，冒号后是
+// PopAnimName（如 "skin:Peashooter_skinA"），普通装扮照旧填层名。不注册新字段的原因：
+// 别名 key 会与官方或移植数据里的同名 key 抢同一个槽位。
+// 数据侧硬要求：植物数据要列 "LoDCostumes": [装扮ID...]（否则取当前装扮 ID 只会得到 -100），
+// skin 动画所在的资源组也要在植物已加载的资源组里。
+//
+// 机制：a1 = PlantType 系对象，+28 = AnimRigClass（决定建哪个动画类），+40 = PopAnim
+// （动画资源名，解析不到有兜底）。skin 即换 +40 的名字串、跑原函数、再还原。
+//
+// 组成：A skin 分支（改 PopAnim 名字串 + 跑原创建函数），B 图鉴切换重建（切换入口 hook）。
+
+constexpr int kCostumeNameOff = 32;  // LayerName 槽位（ARM32）
+#ifdef _DEBUG
+constexpr const char *kCostumeSkinRev = __DATE__ " " __TIME__;  // 构建时间戳（仅 Debug）
+#endif
+
+// ============ A. skin 分支 ============
+typedef int (*CostumeAnimApplier)(int a1, char a2);
+static CostumeAnimApplier oCostumeAnimApplier = nullptr;
+typedef uint32_t (*CostumeGetId)(int plantName);
+static CostumeGetId oCostumeGetId = nullptr;
+typedef int (*CostumeFindItem)(uint32_t costumeID);
+static CostumeFindItem oCostumeFindItem = nullptr;
+constexpr int kCostumeAnimNameOff = 40;  // PlantType::PopAnim（A32；A64 = +80）
+
+// CostumeItemType（44B）：LayerName @32(String)；值以 "skin:" 开头即 skin 装扮
+static bool isSkinItem(int item, const char **outAnim) {
+  if (!item)
+    return false;
+  const char *v = GeneralFunction::sexyStrPtr(item + kCostumeNameOff);
+  if (!v || strncmp(v, "skin:", 5) != 0 || !v[5])
+    return false;
+  *outAnim = v + 5;
+  return true;
+}
+
+// 把配置对象上的 PopAnim 名字串换成 animName，跑原创建函数（名字解析成 PopAnim 资源）后还原
+static int createAnimWithName(int a1, char a2, const char *animName) {
+  void *nameField = (void *)(a1 + kCostumeAnimNameOff);
+  std::string saved(GeneralFunction::sexyStrPtr((int)nameField));
+  LOGI("[CostumeSkin] skin '%s' (native PopAnim is '%s')", animName, saved.c_str());
+  GeneralFunction::oSexyStringAssign(nameField, animName, (int)strlen(animName));
+  int obj = oCostumeAnimApplier(a1, a2);  // 原函数：把该名字解析成 PopAnim 资源再建动画
+  GeneralFunction::oSexyStringAssign(nameField, saved.c_str(), (int)saved.size());  // 还原
+  return obj;
+}
+
+int hkCostumeAnimApplier(int a1, char a2) {
+  if (!a1)
+    return 0;
+  // a1：+4 = 植物名(SexyString)；+28 = AnimRigClass；+40 = PopAnim（动画资源名）
+  uint32_t cid = oCostumeGetId(a1 + 4);
+  const char *skinAnim = nullptr;
+  if (isSkinItem(oCostumeFindItem(cid), &skinAnim)) {
+    LOGI("[CostumeSkin] skin apply plant='%s' cid=%u anim='%s'",
+         GeneralFunction::sexyStrPtr(a1 + 4), cid, skinAnim);
+    return createAnimWithName(a1, a2, skinAnim);
+  }
+  return oCostumeAnimApplier(a1, a2);  // 非 skin：原逻辑
+}
+
+// ============ B. 图鉴切换装扮重建 ============
+// 图鉴预览 UI 的切换入口只对已存在的动画对象开关层，不重建动画对象；所以切到
+// skin 装扮时要补一次重建（含从 skin 切回普通装扮的反向重建）。
+typedef void (*CostumeSwitch)(int self);
+static CostumeSwitch oCostumeSwitch = nullptr;
+typedef float (*CostumeAnimRateGet)(int animObj);
+static CostumeAnimRateGet oCostumeAnimRateGet = nullptr;
+typedef void (*CostumeAnimRateSet)(int animObj, float rate);
+static CostumeAnimRateSet oCostumeAnimRateSet = nullptr;
+constexpr int kCostumeAnimFinishSlot =
+    184;  // 预览 ctor 建完动画后调用的虚表槽（A32 槽 46 × 4 字节）
+
+// ============ 卡片 box 覆盖表（skin 装扮在图鉴/选卡预览里的定位用）============
+// 卡片上的 box（4 个 int）：绘制动画时按它把内容居中放进卡片。它由卡片布局按
+// 当时的动画算出，所以显示 skin（套用别的植物的动画）时与卡片尺寸不同源，预览位置偏移。
+// 该值只与植物和原装扮绑定、稳定不变，直接查表覆盖。
+// （A64 动画对象槽 +272 / box +280；A32 动画对象槽 +200 / box +204。）
+//
+// 添加植物：表里没有的不会被覆盖。请自行用 Debug 配置编译，在原装扮状态下进一次
+// 图鉴/选卡，从日志读取 "[CostumeSkin] box plant='…' skin=0 = [a b c d]" 的四个数，填进下表即可。
+// 嫌繁琐也可以不加：代价仅是图鉴/选卡预览偏，不影响关卡内显示。
+constexpr int kCardBoxOff = 204;
+
+struct CostumeBoxEntry {
+  const char *plantName;
+  int v[4];
+};
+constexpr CostumeBoxEntry kCostumeBoxes[] = {
+    {"sunflower", {245, 183, 204, 245}},  {"kernelpult", {131, 166, 323, 237}},
+    {"banana", {201, 129, 197, 274}},     {"primalsunflower", {205, 147, 267, 280}},
+    {"moonflower", {203, 119, 204, 251}},
+};
+constexpr size_t kCostumeBoxCount = sizeof(kCostumeBoxes) / sizeof(kCostumeBoxes[0]);
+
+static void applyCostumeBox(int card) {
+  if (!card)
+    return;
+  int entity = *(int *)(card + 136);
+  const char *plantName = entity ? GeneralFunction::sexyStrPtr(entity + 4) : nullptr;
+  if (!plantName)
+    return;
+  for (size_t i = 0; i < kCostumeBoxCount; i++) {
+    if (kCostumeBoxes[i].plantName && strcmp(kCostumeBoxes[i].plantName, plantName) == 0) {
+      memcpy((void *)(card + kCardBoxOff), kCostumeBoxes[i].v, sizeof(kCostumeBoxes[i].v));
+      return;
+    }
+  }
+}
+
+// 卡片 ctor 之后：按植物查到 box 就覆盖（进图鉴时已是 skin 的情况靠这一步）
+typedef void (*CostumePreviewCtor)(int card, int entity, char flag);
+static CostumePreviewCtor oCostumePreviewCtor = nullptr;
+
+void hkCostumePreviewCtor(int card, int entity, char flag) {
+  if (!card)
+    return;
+  oCostumePreviewCtor(card, entity, flag);
+#ifdef _DEBUG
+  const int *b = (const int *)(card + kCardBoxOff);
+  const char *plantName = entity ? GeneralFunction::sexyStrPtr(entity + 4) : nullptr;
+  const char *skinAnim = nullptr;
+  int skin = 0;
+  if (plantName) {
+    uint32_t cid = oCostumeGetId(entity + 4);
+    skin = isSkinItem(oCostumeFindItem(cid), &skinAnim) ? 1 : 0;
+  }
+  LOGI("[CostumeSkin] box plant='%s' skin=%d = [%d %d %d %d]", plantName ? plantName : "?", skin,
+       b[0], b[1], b[2], b[3]);
+#endif
+  applyCostumeBox(card);
+}
+
+// 预览 ctor 建完动画后的收尾：虚表槽 + 速率 = 动画速率 × 实体速度系数@+120。
+// 少这步时新对象速率为 0，动画不推进，控件按空包围盒塌到画面左上角。
+static void finishPreviewAnim(int obj, int entity) {
+  (*(void (**)(int))(*(int *)obj + kCostumeAnimFinishSlot))(obj);
+  oCostumeAnimRateSet(obj, oCostumeAnimRateGet(obj) * *(float *)(entity + 120));
+}
+
+void hkCostumeSwitch(int self) {
+  if (!self)
+    return;
+  oCostumeSwitch(self);
+  int entity = *(int *)(self + 136);  // 预览对象：+136 = 植物实体，+200 = 动画对象
+  if (!entity)
+    return;
+  uint32_t cid = oCostumeGetId(entity + 4);
+  const char *skinAnim = nullptr;
+  bool skin = isSkinItem(oCostumeFindItem(cid), &skinAnim);
+  // 原函数只对旧对象开关层、不换动画，切换后一律重建（applier 内部会按当前装扮 ID 应用层）
+  int obj = skin ? createAnimWithName(entity, 1, skinAnim) : oCostumeAnimApplier(entity, 1);
+  if (!obj)
+    return;                    // 创建失败：保留原动画对象
+  *(int *)(self + 200) = obj;  // 旧动画对象不释放（可能仍被场景引用，宁可泄漏）
+  applyCostumeBox(self);       // box 按植物查表覆盖（skin 动画的 box 与卡片尺寸不同源，会偏）
+  finishPreviewAnim(obj, entity);
+  LOGI("[CostumeSkin] almanac switch plant='%s' cid=%u skin=%d anim='%s'",
+       GeneralFunction::sexyStrPtr(entity + 4), cid, (int)skin, skin ? skinAnim : "(native)");
+}
+
+// ============ H. 商店 HotUI 植物动画：按名字建动画的预览 ============
+// 该函数按控件 +436（植物名）查到的配置对象的 PopAnim 名（+40）新建动画对象（存 +388），
+// 再用 +448（装扮 LayerName）开层。动画由该名字决定，所以在跑原函数之前把配置对象的名字换成
+// skin 名，建出来的就是 skin 动画。
+// 注意：别去写 +388（动画对象），它是该函数自己的产物（手写会被覆盖）。
+typedef void (*HotUIPlantAnim)(int self);
+static HotUIPlantAnim oHotUIPlantAnim = nullptr;
+
+void hkHotUIPlantAnim(int self) {
+  if (self) {
+    const char *layer = GeneralFunction::sexyStrPtr(self + kHotUiLayerNameOff);
+    if (layer && strncmp(layer, "skin:", 5) == 0 && layer[5]) {
+      const char *skinAnim = layer + 5;
+      int cfg = GeneralFunction::resolveWeak((int *)(self + kHotUiPlantNameOff));
+      if (cfg) {
+        void *nameField = (void *)(cfg + kCostumeAnimNameOff);
+        std::string saved(GeneralFunction::sexyStrPtr((int)nameField));
+        GeneralFunction::oSexyStringAssign(nameField, skinAnim, (int)strlen(skinAnim));
+        oHotUIPlantAnim(self);  // 原函数：拷名字，按名字建动画、开层
+        GeneralFunction::oSexyStringAssign(nameField, saved.c_str(), (int)saved.size());  // 还原
+        LOGI("[CostumeSkin] hotUI skin '%s' (native PopAnim is '%s')", skinAnim, saved.c_str());
+        return;
+      }
+    }
+  }
+  oHotUIPlantAnim(self);
+}
+
+inline void process() {
+  if constexpr (ENABLE) {
+    oCostumeAnimApplier = (CostumeAnimApplier)getActualOffset(CostumeAnimApplierAddr);
+    oCostumeFindItem = (CostumeFindItem)getActualOffset(CostumeFindItemAddr);
+    oCostumeAnimRateGet = (CostumeAnimRateGet)getActualOffset(CostumeAnimRateGetAddr);
+    oCostumeAnimRateSet = (CostumeAnimRateSet)getActualOffset(CostumeAnimRateSetAddr);
+    oCostumeGetId = (CostumeGetId)getActualOffset(CostumeGetIdAddr);
+    oHotUIPlantAnim = (HotUIPlantAnim)getActualOffset(HotUIPlantAnimAddr);
+    // A：skin 分支 hook（动画创建时改用 PopAnimName）
+    PVZ2HookFunction(CostumeAnimApplierAddr, (void *)hkCostumeAnimApplier,
+                     (void **)&oCostumeAnimApplier, "CostumeAnimApplier");
+    // B：图鉴切换重建 hook
+    PVZ2HookFunction(CostumeSwitchAddr, (void *)hkCostumeSwitch, (void **)&oCostumeSwitch,
+                     "CostumeSwitch");
+    // H：商店 HotUI 植物动画（动画按配置对象的名字建，换名即可）
+    PVZ2HookFunction(HotUIPlantAnimAddr, (void *)hkHotUIPlantAnim, (void **)&oHotUIPlantAnim,
+                     "HotUIPlantAnim");
+    // C：卡片 ctor 之后按植物覆盖 box（修进图鉴时已是 skin 的偏移）
+    PVZ2HookFunction(CostumePreviewCtorAddr, (void *)hkCostumePreviewCtor,
+                     (void **)&oCostumePreviewCtor, "CostumePreviewCtor");
+#ifdef _DEBUG
+    LOGI("[CostumeSkin] hooks installed @ %s", kCostumeSkinRev);
+#else
+    LOGI("[CostumeSkin] hooks installed");
+#endif
+  }
+}
+
+}  // namespace CostumeSkinPort
+
+#endif
+
 __attribute__((constructor)) void libRestructedLogic_ARM32__main() {
   LOGI("Initializing %s", LIB_TAG);
 
+  GeneralFunction::process();  // 通用工具（SexyString/类型系统等）——最前（无条件）
   HookResourceManagerFunc::process();
   DirectInstallOBB::process();  // 直装包
-
 #if GAME_VERSION < 1031
   AliasToID::process();  // 添加植物 ID
 #endif
-
 #ifdef _DEBUG
   LogOutput::process();     // 输出日志
   CDNExpansion::process();  // 自定义 CDN 列表
 #endif
-
   RSBDecrypt::process();                 // RSB 加密
   PrimeGlyphCacheLimitation::process();  // 修改字符缓冲区大小
   MaxZoom::process();                    // 高视角
   WorldMapVerticalScrolling::process();  // 地图垂直移动
+  EnableDangerRoomRestart::process();    // 无尽开放RESTART按钮
+  DisableAlmanacTutorial::process();     // 禁用图鉴教程（前半段+后半段）
+#if GAME_VERSION < 900
+  SnapdragonWarming::process();  // 火龙草温暖
+#endif
+  AshDeathrattleFix::process();   // 化灰亡语修复（化灰死亡时停原动画时钟）
+  SpringBeanPFInvuln::process();  // 弹簧豆 PF 期间无敌修复（补设 props+232 PF 标志）
+#if GAME_VERSION < 900
+  CostumeSkinPort::process();  // skin 装扮搬运（skin 分支 + 图鉴切换重建）
+#endif
 
   LOGI("Finished initializing");
 }

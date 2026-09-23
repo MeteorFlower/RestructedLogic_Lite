@@ -1,6 +1,6 @@
 /* Cydia Substrate - Powerful Code Insertion Platform
  * Copyright (C) 2008-2011  Jay Freeman (saurik)
-*/
+ */
 
 /* GNU Lesser General Public License, Version 3 {{{ */
 /*
@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public License
  * along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
-**/
+ **/
 /* }}} */
 
 #ifndef SUBSTRATE_LOG_HPP
@@ -37,4 +37,4 @@
 
 #endif
 
-#endif//SUBSTRATE_LOG_HPP
+#endif  // SUBSTRATE_LOG_HPP

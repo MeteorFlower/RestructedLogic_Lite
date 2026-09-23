@@ -1,109 +1,403 @@
-﻿#ifndef __arm__
+#ifndef __arm__
 
 #error "This sub-project is only for ARM architecture."
 
 #endif
 
 constexpr size_t UNKNOWN = 0;
-#define GAME_VERSION 1031
+#define GAME_VERSION 873
 // 填入版本号，为去掉小数点的版本号
 // UNKNOWN 表示暂时未知
 
 #if GAME_VERSION == 873
 
-constexpr size_t PlantNameMapperAddr = UNKNOWN;
-constexpr size_t PrimeGlyphCacheAddr = UNKNOWN;
-constexpr size_t RSBPathRecorderAddr = UNKNOWN;
-constexpr size_t ResourceManagerFuncAddr = 0x5A90CC;
-constexpr size_t CDNLoadAddr = UNKNOWN;
+// ==== MaxZoom ====
+constexpr size_t BoardZoomAddr = 0x6E467C;                 // 高视角缩放
+constexpr size_t BoardZoom2Addr = 0x6E4910;                // 高视角缩放 2
+constexpr size_t LawnAppScreenWidthHeightAddr = 0x5A1454;  // 分辨率设置
+
+// ==== AliasToID ====
+constexpr size_t PlantNameMapperAddr = UNKNOWN;  // 植物名映射（10.3 起不需要）
+constexpr int firstFreePlantID = UNKNOWN;        // 自定义植物 ID 起始值
+
+// ==== CDNExpansion ====
+constexpr size_t CDNLoadAddr = UNKNOWN;  // RTON 加载（名字 + 表 ID + 标志）
+
+// ==== LogOutput ====
+// 无后缀那个是变参 printf 形（cpp 里已实现），下面三个是本版其它日志输出入口（待适配）
 constexpr size_t LogOutputFuncAddr = 0xFEDB0C;
-constexpr size_t LawnAppScreenWidthHeightAddr = 0x5A1454;
-constexpr size_t BoardZoomAddr = 0x6E467C;
-constexpr size_t BoardZoom2Addr = 0x6E4910;
+constexpr size_t LogOutputFuncAddr_Simple = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_Struct = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
+
+// ==== PrimeGlyphCacheLimitation ====
+constexpr size_t PrimeGlyphCacheAddr = UNKNOWN;  // 字符缓冲大小
+
+// ==== RSBDecrypt ====
+constexpr size_t RSBPathRecorderAddr = UNKNOWN;  // 数据包路径记录（换成本地解密文件）
+
+// ==== WorldMapVerticalScrolling ====
 constexpr size_t WorldMapDoMovementAddr = UNKNOWN;
-constexpr size_t WorldMapScrollAddr = UNKNOWN;
-constexpr size_t KeepCenterAddr = UNKNOWN;
-constexpr size_t ScrollInertanceAddr = UNKNOWN;
-constexpr int firstFreePlantID = UNKNOWN;
+
+// ==== HookResourceManagerFunc ====
+constexpr size_t ResourceManagerFuncAddr = 0x5A90CC;  // 资源管理器
+
+// ==== EnableDangerRoomRestart ====
+constexpr size_t PauseMenuShowAddr = 0x5A8928;  // 暂停菜单显示
+
+// ==== DisableAlmanacTutorial ====
+constexpr size_t AlmanacStateUpdateAddr = 0x4A0EB4;  // 图鉴状态更新
+constexpr size_t NarrativeCheckAddr = 0xF5A350;      // 剧情检查
+constexpr size_t TutorialCheckAddr = 0xF5B0C0;       // 教程检查
+
+// ==== GeneralFunction（通用工具：SexyString/类型系统/实体动画）====
+constexpr size_t CtxGetAddr = 0x1001564;           // 取全局解析上下文单例
+constexpr size_t DirGetAddr = 0x1161EBC;           // 类型目录
+constexpr size_t EntityListBindAddr = 0xDCB87C;    // 绑定 props+248 实体列表
+constexpr size_t GetHandleAddr = 0xFF073C;         // 取句柄值（a1+4 位域）
+constexpr size_t HandleResolveAddr = 0x1007204;    // 句柄解析为指针
+constexpr size_t CtxResolveAddr = 0x1003580;       // 上下文解析
+constexpr size_t RegistryGetAddr = 0x1161E68;      // RtClass 注册表单例
+constexpr size_t RtClassCtorAddr = 0x1176D0C;      // RtClass 构造
+constexpr size_t SexyStringAssignAddr = 0x2496BC;  // SexyString 赋值（dst, 字符数据, 长度）
+constexpr size_t SexyStringCopyAddr = 0xFF07D0;    // SexyString 拷贝
+constexpr size_t SexyStringCtorAddr = 0xFF060C;    // SexyString 构造
+constexpr size_t SexyStringDtorAddr = 0xFF0710;    // SexyString 清理/析构
+constexpr size_t SexyStringEmptyAddr = 0xFF0838;   // SexyString 是否为空
+constexpr size_t SexyStringParseAddr = 0x100761C;  // SexyString 解析（a1=输出, a2=上下文, a3=源）
+constexpr size_t ZombieAnimRigGetAddr = 0x70515C;  // 僵尸 AnimRig 解析（海鸥受击实证）
+
+// ==== SnapdragonWarming ====
+constexpr size_t PowerListFindAddr = 0x8D0E68;       // 列表按(type,sub)找 power
+constexpr size_t SnapdragonLoadAddr = 0xA8E104;      // Snapdragon loader(vtable槽7)（hook 点）
+constexpr size_t WarmingCompFactoryAddr = 0xA59754;  // 温暖组件附加工厂(类型63, 附加+返回组件)
+constexpr size_t WarmingSetPropsAddr = 0x3F9EA0;     // 温暖 SetProps(拷贝配置到组件+272)
+
+// ==== AshDeathrattleFix ====
+constexpr size_t BullVeteranVtableAddr = 0x1AE0580;       // ZombieBullVeteran vtable——patch 槽183
+constexpr size_t BullVtableAddr = 0x1AE01E0;              // ZombieBull vtable——patch 槽183
+constexpr size_t DinoBullyVeteranVtableAddr = 0x1AE4C40;  // DinoBullyVeteran vtable——patch 槽183
+constexpr size_t GargantuarDeathAddr = 0x793800;          // 巨人族槽183 死亡收尾
+constexpr size_t ZCorpImpVtableAddr = 0x1AFAAEC;          // ZombieZCorpImp vtable——patch 槽183
+constexpr size_t ZombieAnimPauseAddr = 0x635228;          // 动画对象+147 = mPaused（官方化灰暂停）
+
+// ==== SpringBeanPFInvuln ====
+// 与 ARM64 统一：改 vtable 槽 81 替换（patchVFTable），原函数直接调用，弃用代码 hook
+// （代码 hook 会越界覆盖邻槽函数）
+constexpr size_t IsPlantFoodActiveAddr = 0xDCDCD4;  // PF 状态查询（+232 || 实体槽86，官方检查）
+constexpr size_t SpringBeanDieAddr = 0xA94A1C;      // vtable 槽 81 原函数（死亡回调）
+constexpr size_t SpringBeanVtableAddr =
+    0x1B1AA78;                          // SpringBean vtable 起点（0x1B1AA70 = itanium 头）
+constexpr int kSpringBeanDieSlot = 81;  // 死亡回调槽位
+
+// ==== CostumeSkinPort（高版本 skin 装扮搬运）====
+// 只对 9.x 之前的版本有意义（高版本游戏自带），其余版本块里没有本段
+// 方案：不改 CostumeItemType 布局（元素是 vector 内联 44B，无空隙），skin 标记直接写在原有的
+// LayerName 字段里：值以 "skin:" 开头，冒号后是 PopAnimName。
+constexpr size_t CostumeFindItemAddr = 0xFBF770;     // 按 CostumeID 查 item（stride 44）
+constexpr size_t CostumeGetIdAddr = 0xFBFC90;        // 取当前 CostumeID（参数 = 植物类型名字符串）
+constexpr size_t CostumeAnimRateGetAddr = 0x630DAC;  // 动画速率读取（obj+24 读到 +32 float）
+constexpr size_t CostumeAnimRateSetAddr = 0x630DB8;  // 动画速率写入
+constexpr size_t HotUIPlantAnimAddr = 0xDBC194;      // 商店 HotUI 植物动画（按名字建动画的预览）
+constexpr uint64_t kHotUiPlantNameOff = 436;         // 控件上的植物名（resolveWeak 解析用）
+constexpr uint64_t kHotUiLayerNameOff = 448;         // 装扮 LayerName（判定 skin 用）
+constexpr size_t CostumePreviewCtorAddr = 0x570C4C;  // 图鉴/选卡卡片初始化（之后按植物覆盖 box）
+constexpr size_t CostumeAnimApplierAddr = 0x8899AC;  // 动画创建 hook 点（名字解析后创建）
+constexpr size_t CostumeSwitchAddr = 0x571BA8;       // 图鉴切换装扮入口（切换后重建动画）
 
 #endif
 
 #if GAME_VERSION == 941
 
-constexpr size_t PlantNameMapperAddr = 0xD994B8;
-constexpr size_t PrimeGlyphCacheAddr = UNKNOWN;
-constexpr size_t RSBPathRecorderAddr = UNKNOWN;
-constexpr size_t ResourceManagerFuncAddr = UNKNOWN;
-constexpr size_t CDNLoadAddr = UNKNOWN;
-constexpr size_t LogOutputFuncAddr_Simple = UNKNOWN;
-constexpr size_t LogOutputFuncAddr = UNKNOWN;
-constexpr size_t LogOutputFuncAddr_Struct = UNKNOWN;
-constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
-constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
+// ==== MaxZoom ====
 constexpr size_t BoardZoomAddr = UNKNOWN;
 constexpr size_t BoardZoom2Addr = UNKNOWN;
-constexpr size_t WorldMapDoMovementAddr = 0x44E604;
-constexpr size_t WorldMapScrollAddr = UNKNOWN;
-constexpr size_t KeepCenterAddr = UNKNOWN;
-constexpr size_t ScrollInertanceAddr = UNKNOWN;
+constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
+
+// ==== AliasToID ====
+constexpr size_t PlantNameMapperAddr = 0xD994B8;
 constexpr int firstFreePlantID = 185;
+
+// ==== CDNExpansion ====
+constexpr size_t CDNLoadAddr = UNKNOWN;
+
+// ==== LogOutput ====
+constexpr size_t LogOutputFuncAddr = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_Simple = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_Struct = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
+
+// ==== PrimeGlyphCacheLimitation ====
+constexpr size_t PrimeGlyphCacheAddr = UNKNOWN;
+
+// ==== RSBDecrypt ====
+constexpr size_t RSBPathRecorderAddr = UNKNOWN;
+
+// ==== WorldMapVerticalScrolling ====
+constexpr size_t WorldMapDoMovementAddr = 0x44E604;
+
+// ==== HookResourceManagerFunc ====
+constexpr size_t ResourceManagerFuncAddr = UNKNOWN;
+
+// ==== EnableDangerRoomRestart ====
+constexpr size_t PauseMenuShowAddr = UNKNOWN;
+
+// ==== DisableAlmanacTutorial ====
+constexpr size_t AlmanacStateUpdateAddr = UNKNOWN;
+constexpr size_t NarrativeCheckAddr = UNKNOWN;
+constexpr size_t TutorialCheckAddr = UNKNOWN;
+
+// ==== GeneralFunction ====
+constexpr size_t CtxGetAddr = UNKNOWN;
+constexpr size_t DirGetAddr = UNKNOWN;
+constexpr size_t EntityListBindAddr = UNKNOWN;
+constexpr size_t GetHandleAddr = UNKNOWN;
+constexpr size_t HandleResolveAddr = UNKNOWN;
+constexpr size_t CtxResolveAddr = UNKNOWN;
+constexpr size_t RegistryGetAddr = UNKNOWN;
+constexpr size_t RtClassCtorAddr = UNKNOWN;
+constexpr size_t SexyStringAssignAddr = UNKNOWN;
+constexpr size_t SexyStringCopyAddr = UNKNOWN;
+constexpr size_t SexyStringCtorAddr = UNKNOWN;
+constexpr size_t SexyStringDtorAddr = UNKNOWN;
+constexpr size_t SexyStringEmptyAddr = UNKNOWN;
+constexpr size_t SexyStringParseAddr = UNKNOWN;
+constexpr size_t ZombieAnimRigGetAddr = UNKNOWN;
+
+// ==== AshDeathrattleFix ====
+constexpr size_t BullVeteranVtableAddr = UNKNOWN;
+constexpr size_t BullVtableAddr = UNKNOWN;
+constexpr size_t DinoBullyVeteranVtableAddr = UNKNOWN;
+constexpr size_t GargantuarDeathAddr = UNKNOWN;
+constexpr size_t ZCorpImpVtableAddr = UNKNOWN;
+constexpr size_t ZombieAnimPauseAddr = UNKNOWN;
+
+// ==== SpringBeanPFInvuln ====
+constexpr size_t IsPlantFoodActiveAddr = UNKNOWN;
+constexpr size_t SpringBeanDieAddr = UNKNOWN;
+constexpr size_t SpringBeanVtableAddr = UNKNOWN;
+constexpr int kSpringBeanDieSlot = 81;
 
 #endif
 
 #if GAME_VERSION == 961
 
-constexpr size_t PlantNameMapperAddr = 0xDA5C58;
-constexpr size_t PrimeGlyphCacheAddr = UNKNOWN;
-constexpr size_t RSBPathRecorderAddr = UNKNOWN;
-constexpr size_t ResourceManagerFuncAddr = UNKNOWN;
-constexpr size_t CDNLoadAddr = UNKNOWN;
-constexpr size_t LogOutputFuncAddr = UNKNOWN;
-constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
+// ==== MaxZoom ====
 constexpr size_t BoardZoomAddr = UNKNOWN;
 constexpr size_t BoardZoom2Addr = UNKNOWN;
-constexpr size_t WorldMapDoMovementAddr = 0x441068;
-constexpr size_t WorldMapScrollAddr = 0x440E4C;
-constexpr size_t KeepCenterAddr = 0x446C08;
-constexpr size_t ScrollInertanceAddr = 0x45001C;
+constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
+
+// ==== AliasToID ====
+constexpr size_t PlantNameMapperAddr = 0xDA5C58;
 constexpr int firstFreePlantID = 188;
+
+// ==== CDNExpansion ====
+constexpr size_t CDNLoadAddr = UNKNOWN;
+
+// ==== LogOutput ====
+constexpr size_t LogOutputFuncAddr = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_Simple = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_Struct = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
+
+// ==== PrimeGlyphCacheLimitation ====
+constexpr size_t PrimeGlyphCacheAddr = UNKNOWN;
+
+// ==== RSBDecrypt ====
+constexpr size_t RSBPathRecorderAddr = UNKNOWN;
+
+// ==== WorldMapVerticalScrolling ====
+constexpr size_t WorldMapDoMovementAddr = 0x441068;
+
+// ==== HookResourceManagerFunc ====
+constexpr size_t ResourceManagerFuncAddr = UNKNOWN;
+
+// ==== EnableDangerRoomRestart ====
+constexpr size_t PauseMenuShowAddr = UNKNOWN;
+
+// ==== DisableAlmanacTutorial ====
+constexpr size_t AlmanacStateUpdateAddr = UNKNOWN;
+constexpr size_t NarrativeCheckAddr = UNKNOWN;
+constexpr size_t TutorialCheckAddr = UNKNOWN;
+
+// ==== GeneralFunction ====
+constexpr size_t CtxGetAddr = UNKNOWN;
+constexpr size_t DirGetAddr = UNKNOWN;
+constexpr size_t EntityListBindAddr = UNKNOWN;
+constexpr size_t GetHandleAddr = UNKNOWN;
+constexpr size_t HandleResolveAddr = UNKNOWN;
+constexpr size_t CtxResolveAddr = UNKNOWN;
+constexpr size_t RegistryGetAddr = UNKNOWN;
+constexpr size_t RtClassCtorAddr = UNKNOWN;
+constexpr size_t SexyStringAssignAddr = UNKNOWN;
+constexpr size_t SexyStringCopyAddr = UNKNOWN;
+constexpr size_t SexyStringCtorAddr = UNKNOWN;
+constexpr size_t SexyStringDtorAddr = UNKNOWN;
+constexpr size_t SexyStringEmptyAddr = UNKNOWN;
+constexpr size_t SexyStringParseAddr = UNKNOWN;
+constexpr size_t ZombieAnimRigGetAddr = UNKNOWN;
+
+// ==== AshDeathrattleFix ====
+constexpr size_t BullVeteranVtableAddr = UNKNOWN;
+constexpr size_t BullVtableAddr = UNKNOWN;
+constexpr size_t DinoBullyVeteranVtableAddr = UNKNOWN;
+constexpr size_t GargantuarDeathAddr = UNKNOWN;
+constexpr size_t ZCorpImpVtableAddr = UNKNOWN;
+constexpr size_t ZombieAnimPauseAddr = UNKNOWN;
+
+// ==== SpringBeanPFInvuln ====
+constexpr size_t IsPlantFoodActiveAddr = UNKNOWN;
+constexpr size_t SpringBeanDieAddr = UNKNOWN;
+constexpr size_t SpringBeanVtableAddr = UNKNOWN;
+constexpr int kSpringBeanDieSlot = 81;
 
 #endif
 
 #if GAME_VERSION == 981
 
-constexpr size_t PlantNameMapperAddr = 0xDFC008;
-constexpr size_t PrimeGlyphCacheAddr = 0x13FBA38;
-constexpr size_t RSBPathRecorderAddr = UNKNOWN;
-constexpr size_t ResourceManagerFuncAddr = UNKNOWN;
-constexpr size_t CDNLoadAddr = UNKNOWN;
-constexpr size_t LogOutputFuncAddr = UNKNOWN;
-constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
+// ==== MaxZoom ====
 constexpr size_t BoardZoomAddr = UNKNOWN;
 constexpr size_t BoardZoom2Addr = UNKNOWN;
-constexpr size_t WorldMapDoMovementAddr = 0x483504;
-constexpr size_t WorldMapScrollAddr = UNKNOWN;
-constexpr size_t KeepCenterAddr = UNKNOWN;
-constexpr size_t ScrollInertanceAddr = UNKNOWN;
+constexpr size_t LawnAppScreenWidthHeightAddr = UNKNOWN;
+
+// ==== AliasToID ====
+constexpr size_t PlantNameMapperAddr = 0xDFC008;
 constexpr int firstFreePlantID = 191;
+
+// ==== CDNExpansion ====
+constexpr size_t CDNLoadAddr = UNKNOWN;
+
+// ==== LogOutput ====
+constexpr size_t LogOutputFuncAddr = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_Simple = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_Struct = UNKNOWN;
+constexpr size_t LogOutputFuncAddr_v2 = UNKNOWN;
+
+// ==== PrimeGlyphCacheLimitation ====
+constexpr size_t PrimeGlyphCacheAddr = 0x13FBA38;
+
+// ==== RSBDecrypt ====
+constexpr size_t RSBPathRecorderAddr = UNKNOWN;
+
+// ==== WorldMapVerticalScrolling ====
+constexpr size_t WorldMapDoMovementAddr = 0x483504;
+
+// ==== HookResourceManagerFunc ====
+constexpr size_t ResourceManagerFuncAddr = UNKNOWN;
+
+// ==== EnableDangerRoomRestart ====
+constexpr size_t PauseMenuShowAddr = UNKNOWN;
+
+// ==== DisableAlmanacTutorial ====
+constexpr size_t AlmanacStateUpdateAddr = UNKNOWN;
+constexpr size_t NarrativeCheckAddr = UNKNOWN;
+constexpr size_t TutorialCheckAddr = UNKNOWN;
+
+// ==== GeneralFunction ====
+constexpr size_t CtxGetAddr = UNKNOWN;
+constexpr size_t DirGetAddr = UNKNOWN;
+constexpr size_t EntityListBindAddr = UNKNOWN;
+constexpr size_t GetHandleAddr = UNKNOWN;
+constexpr size_t HandleResolveAddr = UNKNOWN;
+constexpr size_t CtxResolveAddr = UNKNOWN;
+constexpr size_t RegistryGetAddr = UNKNOWN;
+constexpr size_t RtClassCtorAddr = UNKNOWN;
+constexpr size_t SexyStringAssignAddr = UNKNOWN;
+constexpr size_t SexyStringCopyAddr = UNKNOWN;
+constexpr size_t SexyStringCtorAddr = UNKNOWN;
+constexpr size_t SexyStringDtorAddr = UNKNOWN;
+constexpr size_t SexyStringEmptyAddr = UNKNOWN;
+constexpr size_t SexyStringParseAddr = UNKNOWN;
+constexpr size_t ZombieAnimRigGetAddr = UNKNOWN;
+
+// ==== AshDeathrattleFix ====
+constexpr size_t BullVeteranVtableAddr = UNKNOWN;
+constexpr size_t BullVtableAddr = UNKNOWN;
+constexpr size_t DinoBullyVeteranVtableAddr = UNKNOWN;
+constexpr size_t GargantuarDeathAddr = UNKNOWN;
+constexpr size_t ZCorpImpVtableAddr = UNKNOWN;
+constexpr size_t ZombieAnimPauseAddr = UNKNOWN;
+
+// ==== SpringBeanPFInvuln ====
+constexpr size_t IsPlantFoodActiveAddr = UNKNOWN;
+constexpr size_t SpringBeanDieAddr = UNKNOWN;
+constexpr size_t SpringBeanVtableAddr = UNKNOWN;
+constexpr int kSpringBeanDieSlot = 81;
 
 #endif
 
 #if GAME_VERSION == 1031
 
-constexpr size_t PlantNameMapperAddr = UNKNOWN;
-constexpr size_t PrimeGlyphCacheAddr = 0x177ECF4;
-constexpr size_t RSBPathRecorderAddr = 0x16431A8;
-constexpr size_t ResourceManagerFuncAddr = 0x6EE218;
-constexpr size_t CDNLoadAddr = 0x876CB0;
-constexpr size_t LogOutputFuncAddr = 0x146DE24;
-constexpr size_t LawnAppScreenWidthHeightAddr = 0x6E4030;
+// ==== MaxZoom ====
 constexpr size_t BoardZoomAddr = 0x88D3EC;
 constexpr size_t BoardZoom2Addr = 0x88D670;
-constexpr size_t WorldMapDoMovementAddr = UNKNOWN;
+constexpr size_t LawnAppScreenWidthHeightAddr = 0x6E4030;
+
+// ==== AliasToID ====
+constexpr size_t PlantNameMapperAddr = UNKNOWN;
+constexpr int firstFreePlantID = UNKNOWN;  // 高版本不需要
+
+// ==== CDNExpansion ====
+constexpr size_t CDNLoadAddr = 0x876CB0;
+
+// ==== LogOutput ====
+constexpr size_t LogOutputFuncAddr = 0x146DE24;
+constexpr size_t LogOutputFuncAddr_Simple = 0x146E160;
+constexpr size_t LogOutputFuncAddr_Struct = 0x146DFE4;
+constexpr size_t LogOutputFuncAddr_v2 = 0x146E028;
+
+// ==== PrimeGlyphCacheLimitation ====
+constexpr size_t PrimeGlyphCacheAddr = 0x177ECF4;
+
+// ==== RSBDecrypt ====
+constexpr size_t RSBPathRecorderAddr = 0x16431A8;
+
+// ==== WorldMapVerticalScrolling ====
 constexpr size_t WorldMapScrollAddr = 0x523EF0;
 constexpr size_t KeepCenterAddr = 0x52ABDC;
 constexpr size_t ScrollInertanceAddr = 0x5359F4;
-constexpr int firstFreePlantID = UNKNOWN;  // 10.3 不需要
+
+// ==== HookResourceManagerFunc ====
+constexpr size_t ResourceManagerFuncAddr = 0x6EE218;
+
+// ==== EnableDangerRoomRestart ====
+constexpr size_t PauseMenuShowAddr = UNKNOWN;
+
+// ==== DisableAlmanacTutorial ====
+constexpr size_t AlmanacStateUpdateAddr = UNKNOWN;
+constexpr size_t NarrativeCheckAddr = UNKNOWN;
+constexpr size_t TutorialCheckAddr = UNKNOWN;
+
+// ==== GeneralFunction ====
+constexpr size_t CtxGetAddr = UNKNOWN;
+constexpr size_t DirGetAddr = UNKNOWN;
+constexpr size_t EntityListBindAddr = UNKNOWN;
+constexpr size_t GetHandleAddr = UNKNOWN;
+constexpr size_t HandleResolveAddr = UNKNOWN;
+constexpr size_t CtxResolveAddr = UNKNOWN;
+constexpr size_t RegistryGetAddr = UNKNOWN;
+constexpr size_t RtClassCtorAddr = UNKNOWN;
+constexpr size_t SexyStringAssignAddr = UNKNOWN;
+constexpr size_t SexyStringCopyAddr = UNKNOWN;
+constexpr size_t SexyStringCtorAddr = UNKNOWN;
+constexpr size_t SexyStringDtorAddr = UNKNOWN;
+constexpr size_t SexyStringEmptyAddr = UNKNOWN;
+constexpr size_t SexyStringParseAddr = UNKNOWN;
+constexpr size_t ZombieAnimRigGetAddr = UNKNOWN;
+
+// ==== AshDeathrattleFix ====
+constexpr size_t BullVeteranVtableAddr = UNKNOWN;
+constexpr size_t BullVtableAddr = UNKNOWN;
+constexpr size_t DinoBullyVeteranVtableAddr = UNKNOWN;
+constexpr size_t GargantuarDeathAddr = UNKNOWN;
+constexpr size_t ZCorpImpVtableAddr = UNKNOWN;
+constexpr size_t ZombieAnimPauseAddr = UNKNOWN;
+
+// ==== SpringBeanPFInvuln ====
+constexpr size_t IsPlantFoodActiveAddr = UNKNOWN;
+constexpr size_t SpringBeanDieAddr = UNKNOWN;
+constexpr size_t SpringBeanVtableAddr = UNKNOWN;
+constexpr int kSpringBeanDieSlot = 81;
 
 #endif
 

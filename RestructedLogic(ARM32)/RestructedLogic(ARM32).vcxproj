@@ -200,6 +200,7 @@
     <ClCompile Include="Decrypt\aes.cpp" />
     <ClCompile Include="memUtils.cpp" />
     <ClCompile Include="RestructedLogic_ARM32_.cpp" />
+    <ClCompile Include="tinyxml2\tinyxml2.cpp" />
     <ClCompile Include="Unzip\miniz.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Use</PrecompiledHeader>
@@ -233,6 +234,7 @@
     <ClInclude Include="pch.hpp" />
     <ClInclude Include="RestructedLogic_ARM32_.hpp" />
     <ClInclude Include="SexyTypes.hpp" />
+    <ClInclude Include="tinyxml2\tinyxml2.h" />
     <ClInclude Include="Unzip\ApkUnzipper.hpp" />
     <ClInclude Include="Unzip\HashComparer.hpp" />
     <ClInclude Include="Unzip\miniz.hpp" />

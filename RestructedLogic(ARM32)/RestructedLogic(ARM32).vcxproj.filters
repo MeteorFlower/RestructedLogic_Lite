@@ -12,17 +12,20 @@
     <ClCompile Include="x32\jni\libs\Substrate\SubstratePosixMemory.cpp">
       <Filter>x32\jni\libs\Substrate</Filter>
     </ClCompile>
-    <ClCompile Include="Decrypt\aes.cpp">
-      <Filter>Decrypt</Filter>
-    </ClCompile>
     <ClCompile Include="AXML\axml_parser.cpp">
       <Filter>AXML</Filter>
+    </ClCompile>
+    <ClCompile Include="Decrypt\aes.cpp">
+      <Filter>Decrypt</Filter>
     </ClCompile>
     <ClCompile Include="Unzip\miniz.cpp">
       <Filter>Unzip</Filter>
     </ClCompile>
     <ClCompile Include="XXHash\xxhash.cpp">
       <Filter>XXHash</Filter>
+    </ClCompile>
+    <ClCompile Include="tinyxml2\tinyxml2.cpp">
+      <Filter>tinyxml2</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -51,16 +54,16 @@
       <Filter>x32\jni\libs\Substrate</Filter>
     </ClInclude>
     <ClInclude Include="VersionSwitcher.hpp" />
+    <ClInclude Include="pch.hpp" />
+    <ClInclude Include="SexyTypes.hpp" />
+    <ClInclude Include="AXML\axml_parser.hpp">
+      <Filter>AXML</Filter>
+    </ClInclude>
     <ClInclude Include="Decrypt\aes.hpp">
       <Filter>Decrypt</Filter>
     </ClInclude>
     <ClInclude Include="Decrypt\picosha2.hpp">
       <Filter>Decrypt</Filter>
-    </ClInclude>
-    <ClInclude Include="pch.hpp" />
-    <ClInclude Include="SexyTypes.hpp" />
-    <ClInclude Include="AXML\axml_parser.hpp">
-      <Filter>AXML</Filter>
     </ClInclude>
     <ClInclude Include="Unzip\HashComparer.hpp">
       <Filter>Unzip</Filter>
@@ -73,6 +76,9 @@
     </ClInclude>
     <ClInclude Include="XXHash\xxhash.hpp">
       <Filter>XXHash</Filter>
+    </ClInclude>
+    <ClInclude Include="tinyxml2\tinyxml2.h">
+      <Filter>tinyxml2</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -102,6 +108,9 @@
     </Filter>
     <Filter Include="XXHash">
       <UniqueIdentifier>{c48abe1b-a678-4707-895a-3fb2d8d3ac54}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tinyxml2">
+      <UniqueIdentifier>{c2f42043-6dd6-416c-88c1-771492a209e3}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

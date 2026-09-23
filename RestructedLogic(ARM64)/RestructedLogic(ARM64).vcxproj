@@ -189,6 +189,7 @@
     <ClCompile Include="Decrypt\aes.cpp" />
     <ClCompile Include="memUtils.cpp" />
     <ClCompile Include="RestructedLogic_ARM64_.cpp" />
+    <ClCompile Include="tinyxml2\tinyxml2.cpp" />
     <ClCompile Include="Unzip\miniz.cpp" />
     <ClCompile Include="x64\jni\libs\64InlineHook\And64InlineHook.cpp" />
     <ClCompile Include="XXHash\xxhash.cpp" />
@@ -202,6 +203,7 @@
     <ClInclude Include="pch.hpp" />
     <ClInclude Include="RestructedLogic_ARM64_.hpp" />
     <ClInclude Include="SexyTypes.hpp" />
+    <ClInclude Include="tinyxml2\tinyxml2.h" />
     <ClInclude Include="Unzip\ApkUnzipper.hpp" />
     <ClInclude Include="Unzip\HashComparer.hpp" />
     <ClInclude Include="Unzip\miniz.hpp" />

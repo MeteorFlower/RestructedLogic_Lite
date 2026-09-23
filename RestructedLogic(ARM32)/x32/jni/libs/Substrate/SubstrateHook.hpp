@@ -1,7 +1,6 @@
 #ifndef __SUBSTRATEHOOK_H__
 #define __SUBSTRATEHOOK_H__
 
-
 #include <stdlib.h>
 
 #define _extern extern "C" __attribute__((__visibility__("default")))

@@ -18,9 +18,21 @@ RestructedLogic_Lite is a simplified version based on RestructedLogic. It remove
 
 - OBB direct install, with automatic updates to the OBB in storage when the built-in OBB version in the APK is updated.
 
-- Customize CDN read list.
+- Enable the RESTART button in the pause menu of the Dangerroom.
 
-- Game log output.
+- Disable the almanac tutorial. (Stops the forced click in `Find More` button, the tutorial check and the narrative dialogue.)
+
+- Snapdragon warming. (Only for versions before 9.x, the higher versions have it built in.)
+
+- Ash death fix. (A zombie (aka a Gargantuar) killed by an ash effect still triggers its attack frames; pause its animation clock when that happens.)
+
+- Fix Spring Bean is vulnerable during its Plant Food.
+
+- Skin costumes on versions before 9.x. (The plant uses the skin costume's PopAnim, and the skin animation's resource group should be in the plant's resource groups. Write `skin:<POPANIM_NAME>` in the costume's LayerName field to mark it as a skin costume.)
+
+- Customize CDN read list (debug mode only).
+
+- Game log output (debug mode only).
 
   Use the following adb commands (select according to your architecture) on your computer to view the log output:
 
