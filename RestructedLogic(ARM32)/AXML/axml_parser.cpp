@@ -48,6 +48,9 @@ static std::string get_utf8(uint8_t *base, uint32_t off) {
 AppInfo parse_manifest(uint8_t *data, size_t size) {
   AppInfo info;
 
+  if (!data || size < 8)
+    return info;
+
   std::vector<std::string> strings;
 
   uint16_t xmlHeaderSize = r16(data + 2);

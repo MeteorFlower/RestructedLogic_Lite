@@ -20,11 +20,11 @@ RestructedLogic_Lite is a reorganized and evolved version based on RestructedLog
 
 - Enable the `RESTART` and `SAVE AND EXIT` buttons in the pause menu of the Dangerroom. 
 
-- Disable the almanac tutorial. (Stops the forced click on the `Find More` button, the tutorial check and the narrative dialogue.)
+- Disable most dialogue tutorials. (Such as the forced Peashooter upgrade tutorial.)
 
 - Snapdragon warming. (Only for versions before 9.x, the higher versions have it built in.)
 
-- Ash death fix. (A zombie (aka a Gargantuar) killed by an ash effect still triggers its attack frames; pause its animation clock when that happens.)
+- Ash death fix. (Some zombies (such as a Gargantuar) killed by an ash effect still trigger their action frames. This function prevents this situation from happening.)
 
 - Fix Spring Bean being vulnerable during its Plant Food.
 

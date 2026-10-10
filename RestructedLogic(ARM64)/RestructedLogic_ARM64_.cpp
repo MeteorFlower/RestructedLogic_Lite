@@ -159,7 +159,9 @@ bool OBBHashEquals() {
     OBBHash = HashComparer::read_hash_after_header(rsb_self_path_str.c_str());
   } else {
     // 如果大小不一，直接就是不一样
-    if (apkObbSize != std::filesystem::file_size(std::filesystem::path(rsb_self_path_str))) {
+    std::error_code size_ec;
+    auto obbRealSize = std::filesystem::file_size(rsb_self_path_str, size_ec);
+    if (size_ec || apkObbSize != obbRealSize) {
       LOGI("Size mismatch, hashes must differ.");
       return false;
     }
@@ -243,8 +245,8 @@ int gameStartRightLine, preGameRightLine;
 // 设备分辨率
 #ifdef _DEBUG
 int mOrigScreenWidth;
-#endif
 int mOrigScreenHeight;
+#endif
 
 // 游戏分辨率
 int mWidth;
@@ -269,8 +271,8 @@ __int64 hkLawnAppScreenWidthHeight(__int64 a1, int a2) {
   // 10.3：分辨率 172/176，原始屏幕尺寸 1780/1784
 #ifdef _DEBUG
   mOrigScreenWidth = *(unsigned int *)(a1 + 1780);
-#endif
   mOrigScreenHeight = *(unsigned int *)(a1 + 1784);
+#endif
 
   mWidth = *(unsigned int *)(a1 + 172);
 #ifdef _DEBUG
@@ -282,8 +284,8 @@ __int64 hkLawnAppScreenWidthHeight(__int64 a1, int a2) {
   // 8.7.3：分辨率 244/248，原始屏幕尺寸 1860/1864
 #ifdef _DEBUG
   mOrigScreenWidth = *(unsigned int *)(a1 + 1860);
-#endif
   mOrigScreenHeight = *(unsigned int *)(a1 + 1864);
+#endif
 
   mWidth = *(unsigned int *)(a1 + 244);
 #ifdef _DEBUG
@@ -366,7 +368,7 @@ void hkBoardZoom2(__int64 a1) {
     // 改变视野左边缘与棋盘左边缘的距离
     *(_DWORD *)(a1 + 1080) = -(gameStartRightLine - mWidth);
     // 顶部基准线
-    *(_DWORD *)(a1 + 1128) = (_DWORD)mOrigScreenHeight;
+    *(float *)(a1 + 1128) = 0.0f;
   }
 }
 
@@ -486,29 +488,26 @@ int hkLogOutputFunc(char *format, ...) {
     LOGI("LogOutputFunc: Original function pointer is null");
     return -1;
   }
+  if (!format)
+    return -1;
   std::lock_guard<std::mutex> lock(g_logMutex);
 
-  va_list va, va_cpy;
+  va_list va;
+  char temp[1];
   va_start(va, format);
-  va_copy(va_cpy, va);
-
-  // 计算所需长度
-  va_start(va, format);
-  char *buffer, temp[1];
   int len = vsnprintf(temp, 0, format, va);
   va_end(va);
+  if (len < 0)
+    return oLogOutputFunc("%s", format);
 
+  std::vector<char> buffer(len + 1);
   va_start(va, format);
-  buffer = new char[len + 1];
-  len = vsnprintf(buffer, len + 1, format, va);
-  buffer[len] = '\0';
-  LOGI("LogOutputFunc: %s", buffer);
-
-  int result = oLogOutputFunc(format, va_cpy);
-  va_end(va_cpy);
+  vsnprintf(buffer.data(), buffer.size(), format, va);
   va_end(va);
-  delete[] buffer;
-  return result;
+  LOGI("LogOutputFunc: %s", buffer.data());
+
+  // 变参无法原样转发，按格式化后的文本转交（输出等价）
+  return oLogOutputFunc("%s", buffer.data());
 }
 
 inline void process() {
@@ -697,7 +696,7 @@ void *hkRSBPathRecorder(_QWORD *a1) {
   if (a1[0] & 1) {
     path_ptr = (char *)a1[2];  // 动态分配，路径在 a1[2]
   } else {
-    path_ptr = (char *)a1[1];  // 非动态分配，路径在 a1[1]
+    path_ptr = (char *)a1 + 1;  // 非动态分配，路径在 a1+1
   }
   if (!path_ptr || (size_t)path_ptr < 0x1000) {
     LOGI("RSBPathRecorder: Invalid path pointer 0x%x, a1[0]=0x%x", (size_t)path_ptr, a1[0]);
@@ -730,6 +729,10 @@ void *hkRSBPathRecorder(_QWORD *a1) {
       path_components.push_back(part.string());
     }
   }
+  if (path_components.size() < 2) {
+    LOGI("RSBPathRecorder: Path is too short");
+    return result;
+  }
   // 获取包名
   std::string pack_name = path_components[path_components.size() - 2];
   // 获取数据包名
@@ -752,8 +755,12 @@ void *hkRSBPathRecorder(_QWORD *a1) {
   int src_fd = open(original_path.c_str(), O_RDONLY);
   // 读不到文件直接切到temp_path
   if (src_fd >= 0) {
-    uint8_t magic[4];
-    read(src_fd, magic, 4);
+    uint8_t magic[4] = {0};
+    if (read(src_fd, magic, 4) != 4) {
+      LOGI("RSB_TRACE: Read header failed");
+      close(src_fd);
+      return result;
+    }
     if (memcmp(magic, "1bsr", 4) == 0) {
       LOGI("RSB_TRACE: Detected 1bsr, skipping...");
       return result;
@@ -771,7 +778,7 @@ void *hkRSBPathRecorder(_QWORD *a1) {
       LOGI("RSB_TRACE: Detected EBRL, using temp_path...");
     } else {
       // 3. 准备 IV 和 Key (使用你的 HIDE_STR)
-      uint8_t iv_from_header[16];
+      uint8_t iv_from_header[16] = {0};
       read(src_fd, iv_from_header, 16);
 
       uint8_t key[32];
@@ -884,21 +891,18 @@ void *hkRSBPathRecorder(_QWORD *a1) {
   }
   size_t new_path_len = strlen(new_path);
 
+  // 内联形式放不下完整路径：两种形式统一转成动态分配形式
   if (a1[0] & 1) {
     // 动态分配
     if (a1[2]) {
       free((void *)a1[2]);  // 释放原始路径
     }
-    unsigned int v10 = new_path_len > 20 ? new_path_len : 20;
-    unsigned int v8 = (v10 + 16) & 0xFFFFFFF0;  // 分配大小
-    a1[0] = v8 | 1;                             // a1[0] = 65 (0x41)
-    a1[1] = new_path_len;                       // a1[1] = 47 (0x2F)
-    a1[2] = (size_t)new_path;                   // 新路径指针
-  } else {
-    // 非动态分配
-    a1[0] = 2 * new_path_len;  // a1[0] = 2 * 路径长度
-    a1[1] = (size_t)new_path;  // a1[1] = 新路径指针
   }
+  unsigned int v10 = new_path_len > 20 ? new_path_len : 20;
+  unsigned int v8 = (v10 + 16) & 0xFFFFFFF0;  // 分配大小
+  a1[0] = v8 | 1;                             // a1[0] = 65 (0x41)
+  a1[1] = new_path_len;                       // a1[1] = 47 (0x2F)
+  a1[2] = (size_t)new_path;                   // 新路径指针
   LOGI("RSBPathRecorder: Replaced path with %s", temp_path.c_str());
 
   return result;
@@ -1796,6 +1800,9 @@ void hkCostumeSwitch(__int64 self) {
   if (!self)
     return;
   oCostumeSwitch(self);
+  // 引擎只给通过类型查询的卡片建动画对象：没有动画对象的卡片不做后续处理
+  if (!*(uint64_t *)(self + 272))
+    return;
   uint64_t entity = *(uint64_t *)(self + 192);  // 预览对象：+192 = 植物实体，+272 = 动画对象
   if (!entity)
     return;
@@ -1821,6 +1828,9 @@ void hkCostumePreviewCtor(uint64_t card, uint64_t entity, char flag) {
   if (!card)
     return;
   oCostumePreviewCtor(card, entity, flag);
+  // 引擎只给通过类型查询的卡片建动画对象：没有动画对象的卡片不做后续处理
+  if (!*(uint64_t *)(card + 272))
+    return;
 #ifdef _DEBUG
   const int *b = (const int *)(card + kCardBoxOff);
   const char *plantName = entity ? GeneralFunction::sexyStrPtr(entity + 8) : nullptr;
